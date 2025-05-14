@@ -10,3 +10,4 @@ from app.models.hint import Hint
 from app.models.event_challenge import EventChallenge
 from app.models.submission import Submission
 from app.models.activity_log import ActivityLog
+from app.models.admin_action import AdminAction
