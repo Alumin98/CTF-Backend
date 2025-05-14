@@ -1,8 +1,12 @@
 from fastapi import FastAPI
 from app.database import Base, engine
 
-# Explicitly import all models so they're registered before table creation
-from app.models import user, role, team, team_member, category, challenge, hint, challenge_tag, event
+# Explicitly import all models to ensure table creation
+from app.models import (
+    user, role, team, team_member, category, challenge,
+    challenge_tag, event, hint, event_challenge,
+    submission, activity_log
+)
 
 app = FastAPI()
 
