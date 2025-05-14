@@ -1,7 +1,7 @@
-
 from fastapi import FastAPI
 from app.database import Base, engine
-from app import models  # ensures all models are loaded (from __init__.py)
+from app.models import user, role, team, team_member, category, challenge, hint, challenge_tag, event
+
 
 app = FastAPI()
 
