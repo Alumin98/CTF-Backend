@@ -1,0 +1,12 @@
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, func
+from app.database import Base
+
+class Submission(Base):
+    __tablename__ = "submissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    challenge_id = Column(Integer, ForeignKey("challenges.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    submitted_flag = Column(String, nullable=False)
+    is_correct = Column(String, nullable=False)
+    submitted_at = Column(DateTime, default=func.now())
