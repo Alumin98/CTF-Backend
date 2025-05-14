@@ -4,3 +4,6 @@ from app.models.team import Team
 from app.models.team_member import TeamMember
 from app.models.category import Category
 from app.models.challenge import Challenge
+from app.models.hint import Hint
+from app.models.challenge_tag import ChallengeTag
+from app.models.event import Event
