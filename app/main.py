@@ -1,10 +1,13 @@
-from fastapi import FastAPI
-from app.database import Base, engine
 
-# Import all models to register with SQLAlchemy metadata
-from app.models import user, role, 
+from fastapi import FastAPI
 
 app = FastAPI()
 
-# Create tables
+@app.get("/")
+def read_root():
+    return {"message": "Hello, Railway!"}
+from app.database import Base, engine
+from app.models import user
+
+# Create tables on startup
 Base.metadata.create_all(bind=engine)
