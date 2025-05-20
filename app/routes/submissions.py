@@ -17,49 +17,54 @@ async def submit_flag(
     db: Session = Depends(get_db),
     user=Depends(get_current_user)
 ):
-    # Check if challenge exists
-    result = db.execute(select(Challenge).where(Challenge.id == submission.challenge_id))
-    challenge = result.scalar()
-    if not challenge:
-        raise HTTPException(status_code=404, detail="Challenge not found")
+    try:
+        # Check if challenge exists
+        result = db.execute(select(Challenge).where(Challenge.id == submission.challenge_id))
+        challenge = result.scalar()
+        if not challenge:
+            raise HTTPException(status_code=404, detail="Challenge not found")
 
-    # Check if user already submitted this challenge correctly
-    existing = db.execute(
-        select(Submission).where(
-            Submission.user_id == user.id,
-            Submission.challenge_id == submission.challenge_id,
-            Submission.is_correct == True
+        # Check if user already submitted this challenge correctly
+        existing = db.execute(
+            select(Submission).where(
+                Submission.user_id == user.id,
+                Submission.challenge_id == submission.challenge_id,
+                Submission.is_correct == True
+            )
         )
-    )
-    if existing.scalar():
-        return {"correct": False, "message": "You already solved this challenge."}
+        if existing.scalar():
+            return {"correct": False, "message": "You already solved this challenge."}
 
-    # Compare flag
-    is_correct = submission.submitted_flag.strip() == challenge.flag.strip()
+        # Compare flag
+        is_correct = submission.submitted_flag.strip() == challenge.flag.strip()
 
-    # Save submission
-    new_sub = Submission(
-        user_id=user.id,
-        challenge_id=challenge.id,
-        submitted_flag=submission.submitted_flag,
-        is_correct=is_correct
-    )
-    db.add(new_sub)
-    db.commit()
+        # Save submission
+        new_sub = Submission(
+            user_id=user.id,
+            challenge_id=challenge.id,
+            submitted_flag=submission.submitted_flag,
+            is_correct=is_correct
+        )
+        db.add(new_sub)
+        db.commit()
 
-    return {
-        "correct": is_correct,
-        "message": "Correct!" if is_correct else "Incorrect flag."
-    }
-
+        return {
+            "correct": is_correct,
+            "message": "Correct!" if is_correct else "Incorrect flag."
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @router.get("/leaderboard/")
 async def get_leaderboard(db: Session = Depends(get_db)):
-    from sqlalchemy import func
-    from models import User, Submission, Challenge
+    # Correct imports here
+    from app.models.user import User
+    from app.models.submission import Submission
+    from app.models.challenge import Challenge
 
-    # Join submissions with challenges
     result = db.execute(
         select(
             User.username,
@@ -74,5 +79,3 @@ async def get_leaderboard(db: Session = Depends(get_db)):
 
     leaderboard = [{"username": row[0], "score": row[1]} for row in result.all()]
     return leaderboard
-
-
