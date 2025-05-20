@@ -1,4 +1,3 @@
-
 from datetime import datetime
 from pydantic import BaseModel, EmailStr
 
@@ -21,7 +20,6 @@ class UserProfile(BaseModel):
         orm_mode = True
 
 
-
 class TeamCreate(BaseModel):
     name: str
 
@@ -29,8 +27,10 @@ class TeamRead(BaseModel):
     id: int
     team_name: str
     created_at: datetime
+
     class Config:
-        from_attributes = True 
+        orm_mode = True  
+
 
 class ChallengeCreate(BaseModel):
     title: str
@@ -47,18 +47,27 @@ class ChallengePublic(BaseModel):
     points: int
     created_at: datetime
 
+    class Config:
+        orm_mode = True
+
 
 class FlagSubmission(BaseModel):
     challenge_id: int
     submitted_flag: str
 
+class SubmissionRead(BaseModel):
+    id: int
+    user_id: int
+    challenge_id: int
+    submitted_flag: str
+    is_correct: bool  
+    submitted_at: datetime
+
+    class Config:
+        orm_mode = True
+
 class SubmissionResult(BaseModel):
     correct: bool
     message: str
-
-
-    
-class Config:
-    orm_mode = True
 
 
