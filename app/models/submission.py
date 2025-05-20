@@ -8,7 +8,7 @@ class Submission(Base):
     challenge_id = Column(Integer, ForeignKey("challenges.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     submitted_flag = Column(String, nullable=False)
-    is_correct = Column(Boolean, nullable=False)  # Changed to Boolean
+    is_correct = Column(String, nullable=False)  
     submitted_at = Column(DateTime, default=func.now())
 
 
