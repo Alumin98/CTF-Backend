@@ -27,7 +27,7 @@ async def submit_flag(
             select(Submission).where(
                 Submission.user_id == user.id,
                 Submission.challenge_id == submission.challenge_id,
-                Submission.is_correct == true
+                Submission.is_correct == "true"  # Fix: compare string, not boolean
             )
         )
         if existing.scalar():
@@ -39,7 +39,7 @@ async def submit_flag(
             user_id=user.id,
             challenge_id=challenge.id,
             submitted_flag=submission.submitted_flag,
-            is_correct=is_correct
+            is_correct="true" if is_correct else "false"  # Fix: store as string
         )
         db.add(new_sub)
         db.commit()
@@ -48,6 +48,7 @@ async def submit_flag(
             "correct": is_correct,
             "message": "Correct!" if is_correct else "Incorrect flag."
         }
+
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -56,10 +57,6 @@ async def submit_flag(
 
 @router.get("/leaderboard/")
 async def get_leaderboard(db: Session = Depends(get_db)):
-    from app.models.user import User
-    from app.models.submission import Submission
-    from app.models.challenge import Challenge
-
     result = db.execute(
         select(
             User.username,
@@ -67,7 +64,7 @@ async def get_leaderboard(db: Session = Depends(get_db)):
         )
         .join(Submission, Submission.user_id == User.id)
         .join(Challenge, Challenge.id == Submission.challenge_id)
-        .where(Submission.is_correct == true)
+        .where(Submission.is_correct == "true")  # Fix: compare as string
         .group_by(User.id)
         .order_by(func.sum(Challenge.points).desc())
     )
