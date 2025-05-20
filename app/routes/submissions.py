@@ -27,7 +27,7 @@ async def submit_flag(
             select(Submission).where(
                 Submission.user_id == user.id,
                 Submission.challenge_id == submission.challenge_id,
-                Submission.is_correct == "true"  # Fix: compare string, not boolean
+                Submission.is_correct == True
             )
         )
         if existing.scalar():
@@ -39,7 +39,7 @@ async def submit_flag(
             user_id=user.id,
             challenge_id=challenge.id,
             submitted_flag=submission.submitted_flag,
-            is_correct="true" if is_correct else "false"  # Fix: store as string
+            is_correct=is_correct  # ✅ keep as bool
         )
         db.add(new_sub)
         db.commit()
@@ -64,7 +64,7 @@ async def get_leaderboard(db: Session = Depends(get_db)):
         )
         .join(Submission, Submission.user_id == User.id)
         .join(Challenge, Challenge.id == Submission.challenge_id)
-        .where(Submission.is_correct == "true")  # Fix: compare as string
+        .where(Submission.is_correct == True)
         .group_by(User.id)
         .order_by(func.sum(Challenge.points).desc())
     )
