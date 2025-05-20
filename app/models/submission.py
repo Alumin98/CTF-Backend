@@ -16,7 +16,7 @@ def check_existing_correct_submission(db, user_id: int, challenge_id: int):
     stmt = select(Submission).where(
         Submission.user_id == user_id,
         Submission.challenge_id == challenge_id,
-        Submission.is_correct == true  
+        Submission.is_correct == True  
     )
     result = db.execute(stmt).first()
     return result
