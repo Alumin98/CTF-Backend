@@ -18,13 +18,11 @@ async def submit_flag(
     user=Depends(get_current_user)
 ):
     try:
-        # Check if challenge exists
         result = db.execute(select(Challenge).where(Challenge.id == submission.challenge_id))
         challenge = result.scalar()
         if not challenge:
             raise HTTPException(status_code=404, detail="Challenge not found")
 
-        # Check if user already submitted this challenge correctly
         existing = db.execute(
             select(Submission).where(
                 Submission.user_id == user.id,
@@ -35,10 +33,8 @@ async def submit_flag(
         if existing.scalar():
             return {"correct": False, "message": "You already solved this challenge."}
 
-        # Compare flag
         is_correct = submission.submitted_flag.strip() == challenge.flag.strip()
 
-        # Save submission
         new_sub = Submission(
             user_id=user.id,
             challenge_id=challenge.id,
@@ -60,7 +56,6 @@ async def submit_flag(
 
 @router.get("/leaderboard/")
 async def get_leaderboard(db: Session = Depends(get_db)):
-    # Correct imports here
     from app.models.user import User
     from app.models.submission import Submission
     from app.models.challenge import Challenge
