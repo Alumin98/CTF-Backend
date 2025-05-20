@@ -28,7 +28,7 @@ def submit_flag(
             select(Submission).where(
                 Submission.user_id == user.id,
                 Submission.challenge_id == submission.challenge_id,
-                Submission.is_correct == True
+                Submission.is_correct == 'true'
             )
         )
         if existing.scalar():
@@ -66,7 +66,7 @@ def get_leaderboard(db: Session = Depends(get_db)):
         )
         .join(Submission, Submission.user_id == User.id)
         .join(Challenge, Challenge.id == Submission.challenge_id)
-        .where(Submission.is_correct == True)
+        .where(Submission.is_correct == 'true')
         .group_by(User.id, User.username)
         .order_by(func.sum(Challenge.points).desc())
     )
