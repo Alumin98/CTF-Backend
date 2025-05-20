@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.future import select
@@ -12,7 +13,7 @@ from app.auth_token import get_current_user
 router = APIRouter()
 
 @router.post("/submit/", response_model=SubmissionResult)
-async def submit_flag(
+def submit_flag(
     submission: FlagSubmission,
     db: Session = Depends(get_db),
     user=Depends(get_current_user)
@@ -39,7 +40,8 @@ async def submit_flag(
             user_id=user.id,
             challenge_id=challenge.id,
             submitted_flag=submission.submitted_flag,
-            is_correct=is_correct  # ✅ keep as bool
+            is_correct=is_correct,
+            submitted_at=datetime.utcnow()
         )
         db.add(new_sub)
         db.commit()
@@ -56,7 +58,7 @@ async def submit_flag(
 
 
 @router.get("/leaderboard/")
-async def get_leaderboard(db: Session = Depends(get_db)):
+def get_leaderboard(db: Session = Depends(get_db)):
     result = db.execute(
         select(
             User.username,
@@ -65,7 +67,7 @@ async def get_leaderboard(db: Session = Depends(get_db)):
         .join(Submission, Submission.user_id == User.id)
         .join(Challenge, Challenge.id == Submission.challenge_id)
         .where(Submission.is_correct == True)
-        .group_by(User.id)
+        .group_by(User.id, User.username)
         .order_by(func.sum(Challenge.points).desc())
     )
 
