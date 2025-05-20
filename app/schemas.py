@@ -35,7 +35,7 @@ class TeamRead(BaseModel):
 class ChallengeCreate(BaseModel):
     title: str
     description: str
-    category_id: str
+    category_id: int
     points: int
     flag: str
 
@@ -43,7 +43,7 @@ class ChallengePublic(BaseModel):
     id: int
     title: str
     description: str
-    category_id: str
+    category_id: int
     points: int
     created_at: datetime
 
