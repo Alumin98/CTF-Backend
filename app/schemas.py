@@ -17,7 +17,7 @@ class UserProfile(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class TeamCreate(BaseModel):
@@ -29,7 +29,7 @@ class TeamRead(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True  
+        from_attributes = True 
 
 
 class ChallengeCreate(BaseModel):
@@ -48,7 +48,7 @@ class ChallengePublic(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class FlagSubmission(BaseModel):
@@ -64,7 +64,7 @@ class SubmissionRead(BaseModel):
     submitted_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class SubmissionResult(BaseModel):
     correct: bool
