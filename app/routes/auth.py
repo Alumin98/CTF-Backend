@@ -2,24 +2,23 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from fastapi.security import OAuth2PasswordRequestForm
-
 from app.models.user import User
 from app.schemas import UserRegister, UserLogin, UserProfile
 from app.database import get_db
 from app.auth_token import get_current_user, create_access_token
 from passlib.hash import argon2
+import hashlib
 
 router = APIRouter()
 
 # Flag hashing function
-import hashlib
 def hash_flag(flag: str) -> str:
     return hashlib.sha256(flag.encode('utf-8')).hexdigest()
 
 @router.post("/register")
 async def register(user: UserRegister, db: AsyncSession = Depends(get_db)):
-    result = db.execute(select(User).where(User.email == user.email))
-    if result.scalar():
+    result = await db.execute(select(User).where(User.email == user.email))
+    if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already exists")
 
     hashed = argon2.hash(user.password)
@@ -29,16 +28,16 @@ async def register(user: UserRegister, db: AsyncSession = Depends(get_db)):
         password_hash=hashed
     )
     db.add(new_user)
-    db.commit()
+    await db.commit()
     return {"message": "Registered successfully"}
 
 @router.post("/login")
-def login(
+async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
-    result = db.execute(select(User).where(User.email == form_data.username))
-    db_user = result.scalar()
+    result = await db.execute(select(User).where(User.email == form_data.username))
+    db_user = result.scalar_one_or_none()
 
     if not db_user or not argon2.verify(form_data.password, db_user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -47,7 +46,7 @@ def login(
     return {"access_token": token, "token_type": "bearer"}
 
 @router.get("/me")
-def read_users_me(current_user: User = Depends(get_current_user)):
+async def read_users_me(current_user: User = Depends(get_current_user)):
     return {
         "id": current_user.id,
         "username": current_user.username,
