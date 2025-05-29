@@ -17,7 +17,7 @@ def hash_flag(flag: str) -> str:
     return hashlib.sha256(flag.encode('utf-8')).hexdigest()
 
 @router.post("/register")
-def register(user: UserRegister, db: Session = Depends(get_db)):
+async def register(user: UserRegister, db: AsyncSession = Depends(get_db)):
     result = db.execute(select(User).where(User.email == user.email))
     if result.scalar():
         raise HTTPException(status_code=400, detail="Email already exists")
