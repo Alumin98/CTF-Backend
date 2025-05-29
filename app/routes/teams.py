@@ -24,7 +24,7 @@ async def create_team(team: TeamCreate, db: AsyncSession = Depends(get_db), user
 @router.get("/teams/", response_model=list[TeamRead])
 async def list_teams(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Team))
-    teams = (await result.scalars()).all()
+    teams = result.scalars().all()
     return teams
 
 @router.post("/teams/{team_id}/join")
@@ -44,6 +44,10 @@ async def join_team(
     db_user = user_result.scalar_one_or_none()
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
+    if db_user.team_id == team_id:
+        return {"message": "Already a member of this team."}
+    if db_user.team_id is not None:
+        raise HTTPException(status_code=400, detail="Already in a team.")
 
     db_user.team_id = team_id
     await db.commit()
@@ -54,5 +58,5 @@ async def join_team(
 @router.get("/teams/{team_id}/members", response_model=list[UserProfile])
 async def get_team_members(team_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.team_id == team_id))
-    members = (await result.scalars()).all()
+    members = result.scalars().all()
     return members
