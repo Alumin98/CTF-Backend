@@ -31,7 +31,7 @@ async def submit_flag(
             select(Submission).where(
                 Submission.user_id == user.id,
                 Submission.challenge_id == submission.challenge_id,
-                Submission.is_correct == True  # If is_correct is a Boolean
+                Submission.is_correct == True
             )
         )
         if existing.scalar_one_or_none():
@@ -41,17 +41,16 @@ async def submit_flag(
         submitted_hash = hash_flag(submission.submitted_flag)
         is_correct = submitted_hash == challenge.flag
 
-        # Store submission (hash the flag, or keep as is per your model)
         new_sub = Submission(
             user_id=user.id,
             challenge_id=challenge.id,
-            submitted_flag=submission.submitted_flag,  # or store submitted_hash
-            is_correct=is_correct,  # Boolean!
+            submitted_flag=submission.submitted_flag,
+            is_correct=is_correct,
             submitted_at=datetime.utcnow()
         )
         db.add(new_sub)
         await db.commit()
-        # Optionally await db.refresh(new_sub)
+        # Optionally: await db.refresh(new_sub)
 
         return {
             "correct": is_correct,
@@ -62,7 +61,6 @@ async def submit_flag(
         import logging
         logging.exception("Submission error")
         raise HTTPException(status_code=500, detail="Internal server error")
-
 
 @router.get("/leaderboard/")
 async def get_leaderboard(db: AsyncSession = Depends(get_db)):
