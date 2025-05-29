@@ -39,9 +39,15 @@ async def join_team(
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
 
-    # Update current user's team
-    current_user.team_id = team_id
+    # Fetch and update user in session
+    user_result = await db.execute(select(User).where(User.id == current_user.id))
+    db_user = user_result.scalar_one_or_none()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db_user.team_id = team_id
     await db.commit()
+    await db.refresh(db_user)
 
     return {"message": f"Joined team {team.team_name}"}
 
