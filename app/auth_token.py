@@ -7,10 +7,7 @@ from fastapi.security import OAuth2PasswordBearer
 from app.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from fastapi import Depends
 from app.models.user import User
-
-
 
 load_dotenv()
 
@@ -20,19 +17,16 @@ EXPIRY_MINUTES = int(os.getenv("JWT_EXPIRY_MINUTES"))
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
-from fastapi import Depends
-
-
-
-
 def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=EXPIRY_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-
-async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
+async def get_current_user(
+    token: str = Depends(oauth2_scheme), 
+    db: AsyncSession = Depends(get_db)
+):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid token",
@@ -47,18 +41,15 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     except JWTError:
         raise credentials_exception
 
-    result =  db.execute(select(User).where(User.id == user_id))
+    # Await DB call!
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar()
     if user is None:
         raise credentials_exception
 
     return user
 
-
-from fastapi import Depends
-
-
-# Use to protect routes
+# Use to protect routes (async/await for consistency)
 async def require_admin(user: User = Depends(get_current_user)):
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admins only.")
