@@ -23,4 +23,4 @@ app.include_router(challenge_router)
 app.include_router(submission_router)
 
 # Auto-create all tables in the DB on startup
-Base.metadata.create_all(bind=engine)
+#Base.metadata.create_all(bind=engine)
