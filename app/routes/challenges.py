@@ -32,7 +32,7 @@ async def list_challenges(db: AsyncSession = Depends(get_db)):
 @router.get("/challenges/{challenge_id}", response_model=ChallengePublic)
 async def get_challenge(challenge_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Challenge).where(Challenge.id == challenge_id))
-    challenge = result.scalar()
+    challenge = result.scalar_one_or_none()
     if not challenge:
         raise HTTPException(status_code=404, detail="Challenge not found")
     return challenge
