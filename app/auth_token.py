@@ -17,14 +17,14 @@ EXPIRY_MINUTES = int(os.getenv("JWT_EXPIRY_MINUTES"))
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
-def create_access_token(data: dict):
+def create_access_token(data: dict) -> str:
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=EXPIRY_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme), 
+    token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db)
 ):
     credentials_exception = HTTPException(
@@ -32,25 +32,21 @@ async def get_current_user(
         detail="Invalid token",
         headers={"WWW-Authenticate": "Bearer"},
     )
-
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("user_id")
-        if user_id is None:
+        if not user_id:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
 
-    # Await DB call!
     result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar()
+    user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception
-
     return user
 
-# Use to protect routes (async/await for consistency)
 async def require_admin(user: User = Depends(get_current_user)):
-    if user.role != "admin":
+    if getattr(user, "role", None) != "admin":
         raise HTTPException(status_code=403, detail="Admins only.")
     return user
