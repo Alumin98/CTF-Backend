@@ -9,13 +9,14 @@ from app.models.user import User
 from app.schemas import FlagSubmission, SubmissionResult
 from app.database import get_db
 from app.auth_token import get_current_user
+from app.routes.auth import hash_flag
 
 router = APIRouter()
 
 @router.post("/submit/", response_model=SubmissionResult)
-def submit_flag(
+async def submit_flag(
     submission: FlagSubmission,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user)
 ):
     try:
@@ -39,8 +40,8 @@ def submit_flag(
         new_sub = Submission(
             user_id=user.id,
             challenge_id=challenge.id,
-            submitted_flag=submission.submitted_flag,
-            is_correct=is_correct,
+            submitted_hash = hash_flag(submission.submitted_flag),
+            is_correct = submitted_hash == challenge.flag,
             submitted_at=datetime.utcnow()
         )
         db.add(new_sub)
