@@ -16,11 +16,12 @@ from app.routes.submissions import router as submission_router
 
 app = FastAPI()
 
-# Include routers
 app.include_router(auth_router, prefix="/auth")
 app.include_router(team_router)
 app.include_router(challenge_router)
 app.include_router(submission_router)
 
-# Auto-create all tables in the DB on startup
-#Base.metadata.create_all(bind=engine)
+@app.on_event("startup")
+async def on_startup():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
