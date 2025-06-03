@@ -21,6 +21,9 @@ async def register(user: UserRegister, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == user.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already exists")
+    
+    if len(user.password) < 8:
+        raise HTTPException(status_code=400, detail="Password too short")
 
     hashed = pwd_context.hash(user.password)
     new_user = User(
