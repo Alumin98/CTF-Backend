@@ -8,3 +8,5 @@ class Team(Base):
     team_name = Column(String(100), unique=True, nullable=False)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=func.now())
+    competition_id = Column(Integer, ForeignKey("competitions.id"))
+
