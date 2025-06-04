@@ -14,3 +14,4 @@ class Challenge(Base):
     docker_image = Column(String(255))
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.now())
+    competition_id = Column(Integer, ForeignKey("competitions.id"))
