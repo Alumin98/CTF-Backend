@@ -25,3 +25,7 @@ app.include_router(submission_router)
 async def on_startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+from app.routes import competition
+app.include_router(competition.router)
+
