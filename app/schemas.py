@@ -70,4 +70,17 @@ class SubmissionResult(BaseModel):
     correct: bool
     message: str
 
+class CompetitionBase(BaseModel):
+    name: str
+    start_time: datetime
+    end_time: datetime
+    team_limit: int
 
+class CompetitionCreate(CompetitionBase):
+    pass
+
+class CompetitionOut(CompetitionBase):
+    id: int
+
+    class Config:
+        orm_mode = True
