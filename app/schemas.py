@@ -1,3 +1,4 @@
+from typing import Optional
 from datetime import datetime
 from pydantic import BaseModel, EmailStr
 
@@ -38,6 +39,9 @@ class ChallengeCreate(BaseModel):
     category_id: int
     points: int
     flag: str
+    is_private: Optional[bool] = False
+    visible_from: Optional[datetime] = None
+    visible_to: Optional[datetime] = None
 
 class ChallengePublic(BaseModel):
     id: int
@@ -46,6 +50,9 @@ class ChallengePublic(BaseModel):
     category_id: int
     points: int
     created_at: datetime
+    is_private: Optional[bool] = False
+    visible_from: Optional[datetime] = None
+    visible_to: Optional[datetime] = None
 
     class Config:
         from_attributes = True

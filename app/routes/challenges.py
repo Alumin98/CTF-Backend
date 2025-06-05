@@ -23,11 +23,24 @@ async def create_challenge(
     await db.refresh(new_challenge)
     return new_challenge
 
+from datetime import datetime
+
 @router.get("/challenges/", response_model=list[ChallengePublic])
 async def list_challenges(db: AsyncSession = Depends(get_db)):
+    now = datetime.utcnow()
     result = await db.execute(select(Challenge))
     challenges = result.scalars().all()
-    return challenges
+
+    # Apply visibility and time filters
+    visible_challenges = [
+        c for c in challenges
+        if not c.is_private
+        and (c.visible_from is None or c.visible_from <= now)
+        and (c.visible_to is None or c.visible_to >= now)
+    ]
+
+    return visible_challenges
+
 
 @router.get("/challenges/{challenge_id}", response_model=ChallengePublic)
 async def get_challenge(challenge_id: int, db: AsyncSession = Depends(get_db)):

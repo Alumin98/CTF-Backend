@@ -13,5 +13,8 @@ class Challenge(Base):
     difficulty = Column(String(20))  # easy/medium/hard
     docker_image = Column(String(255))
     is_active = Column(Boolean, default=True)
+    is_private = Column(Boolean, default=False)
+    visible_from = Column(DateTime, nullable=True)
+    visible_to = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=func.now())
     competition_id = Column(Integer, ForeignKey("competitions.id"))
