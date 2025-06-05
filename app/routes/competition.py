@@ -2,8 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.competition import Competition
-from app.schemas.competition import CompetitionCreate, CompetitionOut
-
+from app.schemas import CompetitionCreate, CompetitionOut
 router = APIRouter(prefix="/competitions", tags=["competitions"])
 
 @router.post("/", response_model=CompetitionOut)
