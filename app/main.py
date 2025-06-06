@@ -34,6 +34,6 @@ async def on_startup():
         await conn.run_sync(Base.metadata.create_all)
     logging.info("CTF backend API started up and database tables ensured.")
 
-from app.routes import competition
-app.include_router(competition.router)
+#from app.routes import competition
+#app.include_router(competition.router)
 
