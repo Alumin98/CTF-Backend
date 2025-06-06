@@ -1,3 +1,10 @@
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+)
+
 from fastapi import FastAPI
 from app.database import Base, engine
 
@@ -25,6 +32,7 @@ app.include_router(submission_router)
 async def on_startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    logging.info("CTF backend API started up and database tables ensured.")
 
 from app.routes import competition
 app.include_router(competition.router)

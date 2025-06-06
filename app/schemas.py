@@ -1,4 +1,3 @@
-from typing import Optional
 from datetime import datetime
 from pydantic import BaseModel, EmailStr
 
@@ -39,9 +38,6 @@ class ChallengeCreate(BaseModel):
     category_id: int
     points: int
     flag: str
-    is_private: Optional[bool] = False
-    visible_from: Optional[datetime] = None
-    visible_to: Optional[datetime] = None
 
 class ChallengePublic(BaseModel):
     id: int
@@ -50,9 +46,6 @@ class ChallengePublic(BaseModel):
     category_id: int
     points: int
     created_at: datetime
-    is_private: Optional[bool] = False
-    visible_from: Optional[datetime] = None
-    visible_to: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -66,7 +59,7 @@ class SubmissionRead(BaseModel):
     id: int
     user_id: int
     challenge_id: int
-    submitted_flag: str
+    submitted_hash: str
     is_correct: bool  
     submitted_at: datetime
 
@@ -77,17 +70,4 @@ class SubmissionResult(BaseModel):
     correct: bool
     message: str
 
-class CompetitionBase(BaseModel):
-    name: str
-    start_time: datetime
-    end_time: datetime
-    team_limit: int
 
-class CompetitionCreate(CompetitionBase):
-    pass
-
-class CompetitionOut(CompetitionBase):
-    id: int
-
-    class Config:
-        orm_mode = True

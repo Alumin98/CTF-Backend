@@ -44,7 +44,7 @@ async def submit_flag(
         new_sub = Submission(
             user_id=user.id,
             challenge_id=challenge.id,
-            submitted_flag=submission.submitted_flag,
+            submitted_hash=submitted_hash,
             is_correct=is_correct,
             submitted_at=datetime.utcnow()
         )
