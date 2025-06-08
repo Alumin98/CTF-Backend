@@ -81,11 +81,10 @@ async def get_challenge_solvers(
     challenge_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    # correct submissions, join to user and team
     stmt = (
         select(Submission, User, Team)
         .join(User, Submission.user_id == User.id)
-        .join(Team, User.team_id == Team.id)
+        .join(Team, User.team_id == Team.id, isouter=True)  # safer for users without team
         .where(
             Submission.challenge_id == challenge_id,
             Submission.is_correct == True
@@ -97,9 +96,10 @@ async def get_challenge_solvers(
 
     solvers = [
         {
-            "team": team.team_name,
+            "team": team.team_name if team else None,
             "user": user.username,
-            "timestamp": submission.submitted_at.isoformat()
+            "timestamp": submission.submitted_at.isoformat(),
+            "first_blood": submission.first_blood
         }
         for submission, user, team in rows
     ]

@@ -41,12 +41,23 @@ async def submit_flag(
         submitted_hash = hash_flag(submission.submitted_flag)
         is_correct = submitted_hash == challenge.flag
 
+        # Check if first blood exists for this challenge
+        first_blood_exists = await db.execute(
+            select(Submission).where(
+            Submission.challenge_id == challenge.id,
+            Submission.is_correct == True,
+            Submission.first_blood == True
+            )
+        )
+        is_first_blood = False if first_blood_exists.scalar_one_or_none() else True
+
         new_sub = Submission(
             user_id=user.id,
             challenge_id=challenge.id,
             submitted_hash=submitted_hash,
             is_correct=is_correct,
-            submitted_at=datetime.utcnow()
+            submitted_at=datetime.utcnow(),
+            first_blood=is_first_blood
         )
         db.add(new_sub)
         await db.commit()
