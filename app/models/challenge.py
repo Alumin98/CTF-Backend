@@ -10,12 +10,12 @@ class Challenge(Base):
     category_id = Column(Integer, ForeignKey("categories.id"))
     flag = Column(String(255))
     points = Column(Integer)
-    difficulty = Column(String(20))  # easy/medium/hard
-    docker_image = Column(String(255))
+    difficulty = Column(String(20), nullable=True, default='easy')
+    docker_image = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
     is_private = Column(Boolean, default=False)
     visible_from = Column(DateTime, nullable=True)
     visible_to = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=func.now())
-    competition_id = Column(Integer, ForeignKey("competitions.id"))
+    competition_id = Column(Integer, ForeignKey("competitions.id"), nullable=True)
     unlocked_by_id = Column(Integer, ForeignKey("challenges.id"), nullable=True)  # ✅ recently added

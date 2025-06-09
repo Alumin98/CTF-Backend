@@ -37,7 +37,10 @@ class ChallengeCreate(BaseModel):
     category_id: int
     points: int
     flag: str
-    unlocked_by_id: int | None = None 
+    unlocked_by_id: int | None = None
+    difficulty: str | None = None
+    docker_image: str | None = None
+    competition_id: int | None = None
 
 #UPDATED
 class ChallengePublic(BaseModel):
