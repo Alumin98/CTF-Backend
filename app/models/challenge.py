@@ -2,9 +2,9 @@ from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, DateT
 from app.database import Base
 
 class Challenge(Base):
-    tablename = "challenges"
+    __tablename__ = "challenges"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)  # ✅ MUST HAVE THIS
     title = Column(String(100), nullable=False)
     description = Column(Text)
     category_id = Column(Integer, ForeignKey("categories.id"))
@@ -18,5 +18,4 @@ class Challenge(Base):
     visible_to = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=func.now())
     competition_id = Column(Integer, ForeignKey("competitions.id"))
-    first_blood = Column(Boolean, default=False)
-    unlocked_by_id = Column(Integer, ForeignKey("challenges.id"), nullable=True)
+    unlocked_by_id = Column(Integer, ForeignKey("challenges.id"), nullable=True)  # ✅ recently added
