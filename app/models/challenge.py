@@ -18,3 +18,6 @@ class Challenge(Base):
     visible_to = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=func.now())
     competition_id = Column(Integer, ForeignKey("competitions.id"))
+
+    # ✅ NEW: Challenge unlock logic
+    unlocked_by_id = Column(Integer, ForeignKey("challenges.id"), nullable=True)

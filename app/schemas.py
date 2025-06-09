@@ -19,7 +19,6 @@ class UserProfile(BaseModel):
     class Config:
         from_attributes = True
 
-
 class TeamCreate(BaseModel):
     name: str
 
@@ -31,14 +30,16 @@ class TeamRead(BaseModel):
     class Config:
         from_attributes = True 
 
-
+# ✅ UPDATED
 class ChallengeCreate(BaseModel):
     title: str
     description: str
     category_id: int
     points: int
     flag: str
+    unlocked_by_id: int | None = None  # NEW
 
+# ✅ UPDATED
 class ChallengePublic(BaseModel):
     id: int
     title: str
@@ -46,10 +47,10 @@ class ChallengePublic(BaseModel):
     category_id: int
     points: int
     created_at: datetime
+    unlocked_by_id: int | None = None  # NEW
 
     class Config:
         from_attributes = True
-
 
 class FlagSubmission(BaseModel):
     challenge_id: int
@@ -69,5 +70,3 @@ class SubmissionRead(BaseModel):
 class SubmissionResult(BaseModel):
     correct: bool
     message: str
-
-
