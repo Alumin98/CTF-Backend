@@ -3,7 +3,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.models.challenge import Challenge
 from app.database import get_db
-from fastapi import Body
 from app.schemas import ChallengeCreate, ChallengePublic
 from app.auth_token import require_admin
 from app.routes.auth import hash_flag
@@ -12,6 +11,11 @@ from app.models.user import User
 from app.models.team import Team
 
 router = APIRouter()
+
+# Dependency for getting current user (replace with your actual dependency)
+def get_current_user():
+    # Implement your user retrieval logic here
+    pass
 
 @router.post("/challenges/", response_model=ChallengePublic)
 async def create_challenge(
@@ -30,19 +34,16 @@ async def create_challenge(
 @router.get("/challenges/", response_model=list[ChallengePublic])
 async def list_challenges(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(),  # this should be a user-dependency if you have auth
+    current_user: User = Depends(get_current_user),  # Use actual dependency
 ):
     result = await db.execute(select(Challenge))
     challenges = result.scalars().all()
 
-    # Filter based on unlock logic
     unlocked_challenges = []
-
     for challenge in challenges:
         if challenge.unlocked_by_id is None:
             unlocked_challenges.append(challenge)
         else:
-            # check if current_user has solved the unlocked_by_id challenge
             subquery = await db.execute(
                 select(Submission)
                 .where(
@@ -57,7 +58,10 @@ async def list_challenges(
     return unlocked_challenges
 
 @router.get("/challenges/{challenge_id}", response_model=ChallengePublic)
-async def get_challenge(challenge_id: int, db: AsyncSession = Depends(get_db)):
+async def get_challenge(
+    challenge_id: int,
+    db: AsyncSession = Depends(get_db)
+):
     result = await db.execute(select(Challenge).where(Challenge.id == challenge_id))
     challenge = result.scalar_one_or_none()
     if not challenge:
@@ -108,7 +112,7 @@ async def get_challenge_solvers(
     stmt = (
         select(Submission, User, Team)
         .join(User, Submission.user_id == User.id)
-        .join(Team, User.team_id == Team.id, isouter=True) # safer for users without team
+        .join(Team, User.team_id == Team.id, isouter=True)
         .where(
             Submission.challenge_id == challenge_id,
             Submission.is_correct == True
@@ -120,10 +124,10 @@ async def get_challenge_solvers(
 
     solvers = [
         {
-            "team": team.team_name,
+            "team": team.team_name if team else None,
             "user": user.username,
-            "timestamp": submission.submitted_at.isoformat()
-	    "first_blood": submission.first_blood
+            "timestamp": submission.submitted_at.isoformat(),
+            "first_blood": getattr(submission, "first_blood", False)
         }
         for submission, user, team in rows
     ]
