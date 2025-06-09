@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.models.challenge import Challenge
 from app.database import get_db
+from fastapi import Body
 from app.schemas import ChallengeCreate, ChallengePublic
 from app.auth_token import require_admin
 from app.routes.auth import hash_flag
@@ -107,7 +108,7 @@ async def get_challenge_solvers(
     stmt = (
         select(Submission, User, Team)
         .join(User, Submission.user_id == User.id)
-        .join(Team, User.team_id == Team.id)
+        .join(Team, User.team_id == Team.id, isouter=True) # safer for users without team
         .where(
             Submission.challenge_id == challenge_id,
             Submission.is_correct == True
@@ -122,6 +123,7 @@ async def get_challenge_solvers(
             "team": team.team_name,
             "user": user.username,
             "timestamp": submission.submitted_at.isoformat()
+	    "first_blood": submission.first_blood
         }
         for submission, user, team in rows
     ]

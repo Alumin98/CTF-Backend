@@ -10,6 +10,7 @@ class Submission(Base):
     submitted_hash = Column(String, nullable=False)
     is_correct = Column(String, nullable=False)  
     submitted_at = Column(DateTime, default=func.now())
+    first_blood = Column(Boolean, default=False)
 
 
 def check_existing_correct_submission(db, user_id: int, challenge_id: int):

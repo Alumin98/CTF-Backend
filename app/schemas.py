@@ -30,16 +30,16 @@ class TeamRead(BaseModel):
     class Config:
         from_attributes = True 
 
-# ✅ UPDATED
+#UPDATED
 class ChallengeCreate(BaseModel):
     title: str
     description: str
     category_id: int
     points: int
     flag: str
-    unlocked_by_id: int | None = None  # NEW
+    unlocked_by_id: int | None = None 
 
-# ✅ UPDATED
+#UPDATED
 class ChallengePublic(BaseModel):
     id: int
     title: str
@@ -47,7 +47,7 @@ class ChallengePublic(BaseModel):
     category_id: int
     points: int
     created_at: datetime
-    unlocked_by_id: int | None = None  # NEW
+    unlocked_by_id: int | None = None  
 
     class Config:
         from_attributes = True
