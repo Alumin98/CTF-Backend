@@ -60,9 +60,13 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
 
 @router.post("/make-me-admin")
 async def make_me_admin(
-    current_user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    current_user.role = "admin"
+    # Promote the user
+    user.role = "admin"
+    db.add(user)
     await db.commit()
-    return {"message": f"{current_user.username} is now an admin."}
+    await db.refresh(user)
+    return {"message": "You are now an admin"}
+
