@@ -73,7 +73,7 @@ async def submit_flag(
             submitted_hash=submitted_hash,
             is_correct=is_correct,
             submitted_at=datetime.utcnow(),
-            first_blood=is_first_blood
+            first_blood=is_first_blood,
             score=score if is_correct else 0
         )
         db.add(new_sub)
