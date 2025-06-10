@@ -23,13 +23,18 @@ async def create_challenge(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_admin),
 ):
-    challenge_data = challenge.dict()
-    challenge_data['flag'] = hash_flag(challenge.flag)
-    new_challenge = Challenge(**challenge_data)
-    db.add(new_challenge)
-    await db.commit()
-    await db.refresh(new_challenge)
-    return new_challenge
+    try:
+        challenge_data = challenge.dict()
+        challenge_data['flag'] = hash_flag(challenge.flag)
+        new_challenge = Challenge(**challenge_data)
+        db.add(new_challenge)
+        await db.commit()
+        await db.refresh(new_challenge)
+        return new_challenge
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/challenges/", response_model=list[ChallengePublic])
 async def list_challenges(
