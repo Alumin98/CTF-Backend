@@ -36,13 +36,18 @@ async def list_challenges(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),  # Use actual dependency
 ):
+    from datetime import datetime
+
+    now = datetime.utcnow()
+
     result = await db.execute(select(Challenge))
     challenges = result.scalars().all()
 
     unlocked_challenges = []
     for challenge in challenges:
+        is_unlocked = False
         if challenge.unlocked_by_id is None:
-            unlocked_challenges.append(challenge)
+            is_unlocked = True
         else:
             subquery = await db.execute(
                 select(Submission)
@@ -53,20 +58,15 @@ async def list_challenges(
                 )
             )
             if subquery.first():
+                is_unlocked = True
+
+        if is_unlocked:
+            if not challenge.is_private \
+                and (challenge.visible_from is None or challenge.visible_from <= now) \
+                and (challenge.visible_to is None or challenge.visible_to >= now):
                 unlocked_challenges.append(challenge)
 
     return unlocked_challenges
-
-@router.get("/challenges/{challenge_id}", response_model=ChallengePublic)
-async def get_challenge(
-    challenge_id: int,
-    db: AsyncSession = Depends(get_db)
-):
-    result = await db.execute(select(Challenge).where(Challenge.id == challenge_id))
-    challenge = result.scalar_one_or_none()
-    if not challenge:
-        raise HTTPException(status_code=404, detail="Challenge not found")
-    return challenge
 
 @router.patch("/challenges/{challenge_id}", response_model=ChallengePublic)
 async def update_challenge(
