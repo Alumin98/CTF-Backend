@@ -74,3 +74,13 @@ class SubmissionResult(BaseModel):
     correct: bool
     message: str
     score: int
+
+
+class CompetitionCreate(BaseModel):
+    name: str
+
+class CompetitionOut(CompetitionCreate):
+    id: int
+
+    class Config:
+        from_attributes = True
