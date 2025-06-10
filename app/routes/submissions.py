@@ -40,6 +40,22 @@ async def submit_flag(
         # Hash submitted flag and compare
         submitted_hash = hash_flag(submission.submitted_flag)
         is_correct = submitted_hash == challenge.flag
+        
+        score = 0
+        if is_correct:
+            # --- DYNAMIC SCORING LOGIC ---
+            solved_teams_query = await db.execute(
+                select(func.count(func.distinct(User.team_id)))
+                .select_from(Submission)
+                .join(User, Submission.user_id == User.id)
+                .where(
+                    Submission.challenge_id == challenge.id,
+                    Submission.is_correct == True,
+                    User.team_id != None
+                )
+            )
+            number_of_solves = solved_teams_query.scalar_one() or 0
+            score = max(100 - (10 * number_of_solves), 10)
 
         # Check if first blood exists for this challenge
         first_blood_exists = await db.execute(
@@ -58,6 +74,7 @@ async def submit_flag(
             is_correct=is_correct,
             submitted_at=datetime.utcnow(),
             first_blood=is_first_blood
+            score=score if is_correct else 0
         )
         db.add(new_sub)
         await db.commit()
@@ -65,7 +82,8 @@ async def submit_flag(
 
         return {
             "correct": is_correct,
-            "message": "Correct!" if is_correct else "Incorrect flag."
+            "message": "Correct!" if is_correct else "Incorrect flag.",
+            "score": score
         }
 
     except Exception as e:

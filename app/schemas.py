@@ -73,3 +73,4 @@ class SubmissionRead(BaseModel):
 class SubmissionResult(BaseModel):
     correct: bool
     message: str
+    score: int
