@@ -12,7 +12,7 @@ from app.database import Base, engine
 from app.models import (
     user, role, team, team_member, category, challenge,
     challenge_tag, event, hint, event_challenge,
-    submission, activity_log, admin_action
+    submission, activity_log, admin_action, competition
 )
 
 # ROUTE REGISTRATION
