@@ -66,8 +66,8 @@ async def list_challenges(
                 is_unlocked = True
 
         if is_unlocked:
-            if not challenge.is_private \
-                and (challenge.visible_from is None or challenge.visible_from <= now) \
+            if not challenge.is_private
+                and (challenge.visible_from is None or challenge.visible_from <= now)
                 and (challenge.visible_to is None or challenge.visible_to >= now):
                 unlocked_challenges.append(challenge)
 
