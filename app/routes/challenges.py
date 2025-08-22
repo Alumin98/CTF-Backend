@@ -39,10 +39,8 @@ async def create_challenge(
 @router.get("/challenges/", response_model=list[ChallengePublic])
 async def list_challenges(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),  # Use actual dependency
+    current_user: User = Depends(get_current_user),
 ):
-    from datetime import datetime
-
     now = datetime.utcnow()
 
     result = await db.execute(select(Challenge))
@@ -59,16 +57,18 @@ async def list_challenges(
                 .where(
                     Submission.user_id == current_user.id,
                     Submission.challenge_id == challenge.unlocked_by_id,
-                    Submission.is_correct == True
+                    Submission.is_correct == True  
                 )
             )
             if subquery.first():
                 is_unlocked = True
 
         if is_unlocked:
-            if not challenge.is_private
+            if (
+                not challenge.is_private
                 and (challenge.visible_from is None or challenge.visible_from <= now)
-                and (challenge.visible_to is None or challenge.visible_to >= now):
+                and (challenge.visible_to is None or challenge.visible_to >= now)
+            ):
                 unlocked_challenges.append(challenge)
 
     return unlocked_challenges
