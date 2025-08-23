@@ -1,4 +1,9 @@
 import logging
+import os  ### NEW
+from dotenv import load_dotenv  ### NEW
+
+# Load .env file
+load_dotenv()  ### NEW
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,3 +42,7 @@ async def on_startup():
 from app.routes import competition
 app.include_router(competition.router)
 
+# Example usage of env vars:
+db_url = os.getenv("DATABASE_URL")
+jwt_secret = os.getenv("JWT_SECRET")
+logging.info(f"Loaded DATABASE_URL: {db_url}")
