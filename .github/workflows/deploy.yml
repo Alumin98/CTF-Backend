@@ -11,16 +11,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Install Railway CLI (binary)
-      - name: Install Railway CLI
+      - name: Install Railway CLI (binary)
         run: |
           curl -fsSL https://railway.app/install.sh | sh
           echo "$HOME/.railway/bin" >> $GITHUB_PATH
 
-
+      - name: Link project
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway link --project 643efe96-25d9-41cc-9f06-812b34fe9a5a
 
       - name: Deploy to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          railway up --service "CTF-Backend"   # or use your Service ID
+          railway up --service ae8a39df-6af1-44c5-a12e-15efed38aff8 --ci
+          # If you must target a specific env:
+          # railway up --service ae8a39df-6af1-44c5-a12e-15efed38aff8 --environment 8f0b928a-f947-40d7-ab6c-b6e33d1aea71 --ci
