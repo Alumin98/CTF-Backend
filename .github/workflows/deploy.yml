@@ -1,19 +1,17 @@
 name: Deploy to Railway
-
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
-    # Make your token available to all steps (no login step needed)
     env:
+      # MUST be the Project Token you just created under Project → Settings → Tokens
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install Railway CLI (binary)
@@ -21,10 +19,27 @@ jobs:
           curl -fsSL https://railway.app/install.sh | sh
           echo "$HOME/.railway/bin" >> $GITHUB_PATH
 
-      # Optional sanity check: shows who the CLI is authenticated as
-      - name: Railway whoami
-        run: railway whoami || true
+      # --- DIAGNOSTICS (does not print the token) ---
+      - name: Verify token exists
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "RAILWAY_TOKEN not set in env"; exit 1
+          fi
+          echo "RAILWAY_TOKEN is present"
 
-      # Deploy directly — project/env come from railway.json
+      - name: Check token length & trailing newline
+        run: |
+          # Count bytes
+          LEN=$(printf '%s' "$RAILWAY_TOKEN" | wc -c)
+          echo "Token length (bytes): $LEN"
+          # Show last byte hex (to catch stray newline 0x0a)
+          printf '%s' "$RAILWAY_TOKEN" | tail -c 1 | hexdump -v -e '/1 "Last byte: 0x%02X\n"'
+
+      - name: Sanity - Railway status with project token
+        run: |
+          # With a valid Project token, this should NOT say "Project Token not found"
+          railway status || true
+
+      # --- DEPLOY ---
       - name: Deploy to Railway
         run: railway up --service ae8a39df-6af1-44c5-a12e-15efed38aff8 --ci

@@ -37,3 +37,22 @@ async def on_startup():
 from app.routes import competition
 app.include_router(competition.router)
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import os
+
+app = FastAPI(title="CTF Backend")
+
+# Only enable CORS if ALLOWED_ORIGINS is set (zero-risk)
+raw_origins = os.getenv("ALLOWED_ORIGINS", "").strip()
+if raw_origins:
+    allowed_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,     # exact origins only
+        allow_credentials=True,            # OK with exact origins
+        allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+        allow_headers=["Authorization","Content-Type","Accept","Origin","X-Requested-With"],
+        expose_headers=["Content-Disposition"],
+        max_age=86400,
+    )
