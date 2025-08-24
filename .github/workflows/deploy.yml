@@ -11,23 +11,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Install Railway CLI
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 18
-
+      # Install Railway CLI (binary)
       - name: Install Railway CLI
-        run: npm i -g @railway/cli
+        run: |
+          curl -fsSL https://railway.app/install.sh | sh
+          echo "$HOME/.railway/bin" >> $GITHUB_PATH
 
-      # Deploy using the token; target your service by name or ID
+
+
       - name: Deploy to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          # If your repo isn't linked automatically in Railway,
-          # uncomment the next line and set the project ID as a secret:
-          # railway link --project ${{ secrets.RAILWAY_PROJECT_ID }}
-
-          # Use your service name as shown in Railway (or the service ID)
-          railway up --service "CTF-Backend"
+          railway up --service "CTF-Backend"   # or use your Service ID
