@@ -16,16 +16,16 @@ jobs:
           curl -fsSL https://railway.app/install.sh | sh
           echo "$HOME/.railway/bin" >> $GITHUB_PATH
 
-      - name: Link project
+      #  Authenticate the CLI in CI (non-interactive)
+      - name: Railway login (non-interactive)
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          railway link --project 643efe96-25d9-41cc-9f06-812b34fe9a5a
+        run: railway login --token "$RAILWAY_TOKEN"
 
+      # 📎 Point the CLI at your project (ID from your URL)
+      - name: Link project
+        run: railway link --project 643efe96-25d9-41cc-9f06-812b34fe9a5a
+
+      # 🚀 Deploy to your service (ID from your URL)
       - name: Deploy to Railway
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          railway up --service ae8a39df-6af1-44c5-a12e-15efed38aff8 --ci
-          # If you must target a specific env:
-          # railway up --service ae8a39df-6af1-44c5-a12e-15efed38aff8 --environment 8f0b928a-f947-40d7-ab6c-b6e33d1aea71 --ci
+        run: railway up --service ae8a39df-6af1-44c5-a12e-15efed38aff8 --ci
