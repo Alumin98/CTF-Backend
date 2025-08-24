@@ -1,21 +1,14 @@
-<<<<<<< HEAD
-import logging
-import os  ### NEW
-from dotenv import load_dotenv  ### NEW
-
-# Load .env file
-load_dotenv()  ### NEW
-=======
-# main.py
->>>>>>> 0195287bd5ee6bd7d6f0b58f5f8cea54f51aa919
-
 import logging
 import os
+from dotenv import load_dotenv  # load .env variables
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine
+
+# ----- Load environment variables -----
+load_dotenv()
 
 # ----- Logging -----
 logging.basicConfig(
@@ -24,7 +17,7 @@ logging.basicConfig(
 )
 
 # ----- Import models so metadata is complete for create_all -----
-from app.models import (  # noqa: F401  (imported for side effects)
+from app.models import (  # noqa: F401 (imported for side effects)
     user, role, team, team_member, category, challenge,
     challenge_tag, event, hint, event_challenge,
     submission, activity_log, admin_action, competition
@@ -37,7 +30,7 @@ from app.routes.challenges import router as challenge_router
 from app.routes.submissions import router as submission_router
 from app.routes import competition as competition_routes
 
-# ----- FastAPI app (single instance) -----
+# ----- FastAPI app -----
 app = FastAPI(
     title="CTF Backend",
     version="0.1.0",
@@ -52,7 +45,7 @@ if raw_origins:
     allowed_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=allowed_origins,  # exact origins only
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=[
@@ -62,11 +55,11 @@ if raw_origins:
         max_age=86400,
     )
 
-# ----- Include routers on the SAME app -----
+# ----- Include routers -----
 app.include_router(auth_router, prefix="/auth")
-app.include_router(team_router)            # keep as your routes define
-app.include_router(challenge_router)       # keep as your routes define
-app.include_router(submission_router)      # keep as your routes define
+app.include_router(team_router)
+app.include_router(challenge_router)
+app.include_router(submission_router)
 app.include_router(competition_routes.router)
 
 # ----- Startup: ensure tables exist -----
@@ -76,17 +69,12 @@ async def on_startup():
         await conn.run_sync(Base.metadata.create_all)
     logging.info("CTF backend API started up and database tables ensured.")
 
-<<<<<<< HEAD
-from app.routes import competition
-app.include_router(competition.router)
-
-# Example usage of env vars:
-db_url = os.getenv("DATABASE_URL")
-jwt_secret = os.getenv("JWT_SECRET")
-logging.info(f"Loaded DATABASE_URL: {db_url}")
-=======
-# Optional: health probe
+# ----- Health check endpoint -----
 @app.get("/health", tags=["meta"])
 async def health():
     return {"ok": True}
->>>>>>> 0195287bd5ee6bd7d6f0b58f5f8cea54f51aa919
+
+# ----- Example usage of env vars -----
+db_url = os.getenv("DATABASE_URL")
+jwt_secret = os.getenv("JWT_SECRET")
+logging.info(f"Loaded DATABASE_URL: {db_url}")
