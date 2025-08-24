@@ -8,6 +8,9 @@ from app.models.submission import Submission
 from app.database import get_db
 from app.schemas import TeamCreate, TeamReadPublic, TeamReadAdmin, UserProfile
 from app.auth_token import get_current_user
+import traceback, logging
+
+logger = logging.getLogger("teams")
 
 async def team_has_participated(db: AsyncSession, team_id: int) -> bool:
     """Check if a team has any submissions or is linked to a competition."""
@@ -79,31 +82,40 @@ async def join_team(
     db: AsyncSession = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    # Make sure team exists
-    result = await db.execute(select(Team).where(Team.id == team_id))
-    team = result.scalar_one_or_none()
-    if not team:
-        raise HTTPException(status_code=404, detail="Team not found")
-    
+    try:
+        # Make sure team exists
+        result = await db.execute(select(Team).where(Team.id == team_id))
+        team = result.scalar_one_or_none()
+        if not team:
+            raise HTTPException(status_code=404, detail="Team not found")
 
-    if team.is_deleted:
-        raise HTTPException(status_code=400, detail="Team is deleted.")
+        if hasattr(team, "is_deleted") and team.is_deleted:
+            raise HTTPException(status_code=400, detail="Team is deleted.")
 
-    # Fetch and update user in session
-    user_result = await db.execute(select(User).where(User.id == current_user.id))
-    db_user = user_result.scalar_one_or_none()
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    if db_user.team_id == team_id:
-        return {"message": "Already a member of this team."}
-    if db_user.team_id is not None:
-        raise HTTPException(status_code=400, detail="Already in a team.")
+        # Fetch user
+        user_result = await db.execute(select(User).where(User.id == current_user.id))
+        db_user = user_result.scalar_one_or_none()
+        if not db_user:
+            raise HTTPException(status_code=404, detail="User not found")
 
-    db_user.team_id = team_id
-    await db.commit()
-    await db.refresh(db_user)
+        if db_user.team_id == team_id:
+            return {"message": "Already a member of this team."}
+        if db_user.team_id is not None:
+            raise HTTPException(status_code=400, detail="Already in a team.")
 
-    return {"message": f"Joined team {team.team_name}"}
+        db_user.team_id = team_id
+        await db.commit()
+        await db.refresh(db_user)
+
+        return {"message": f"Joined team {team.team_name}"}
+
+    except HTTPException:
+        raise  # let normal FastAPI handling work
+    except Exception as e:
+        # print traceback to logs
+        logger.error("Error joining team", exc_info=True)
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Join team failed: {str(e)}")
 
 @router.get("/teams/{team_id}/members", response_model=list[UserProfile])
 async def get_team_members(team_id: int, db: AsyncSession = Depends(get_db)):
@@ -129,8 +141,14 @@ async def delete_team(
     team.is_deleted = True
     team.deleted_at = datetime.now(timezone.utc)
     team.deleted_by_user_id = user.id
-
     db.add(team)
+
+    result = await db.execute(select(User).where(User.team_id == team_id))
+    members = result.scalars().all()
+    for member in members:
+        member.team_id = None
+        db.add(member)
+
     await db.commit()
     return
 

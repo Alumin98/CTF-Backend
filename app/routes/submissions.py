@@ -91,18 +91,88 @@ async def submit_flag(
         logging.exception("Submission error")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+# --- REPLACE your existing /leaderboard/ with this ---
+
+from typing import Optional, Literal
+from sqlalchemy import desc, asc
+from app.models.team import Team
+from app.models.event_challenge import EventChallenge
+
 @router.get("/leaderboard/")
-async def get_leaderboard(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(
-            User.username,
-            func.sum(Challenge.points).label("score")
-        )
-        .join(Submission, Submission.user_id == User.id)
+async def get_leaderboard(
+    db: AsyncSession = Depends(get_db),
+    type: Literal["user","team"] = "team",
+    event_id: Optional[int] = None,
+    limit: int = 100
+):
+    """
+    Ranks users or teams by total points with a tie-breaker on earliest correct submission.
+    Optional event filter via EventChallenge mapping.
+    """
+    # Base: only correct submissions (your model stores 'true'/'false' as strings)
+    base = (
+        select(Submission, User, Challenge)
+        .join(User, User.id == Submission.user_id)
         .join(Challenge, Challenge.id == Submission.challenge_id)
-        .where(Submission.is_correct == True)
-        .group_by(User.id, User.username)
-        .order_by(func.sum(Challenge.points).desc())
+        .where(Submission.is_correct == 'true')
     )
-    leaderboard = [{"username": row[0], "score": row[1]} for row in result.all()]
-    return leaderboard
+
+    # Event filter via EventChallenge (Submission doesn't have event_id)
+    if event_id is not None:
+        base = (
+            base.join(EventChallenge, EventChallenge.challenge_id == Submission.challenge_id)
+                .where(EventChallenge.event_id == event_id)
+        )
+
+    if type == "user":
+        # Aggregate by user
+        stmt = (
+            select(
+                User.id.label("subject_id"),
+                User.username.label("name"),
+                func.coalesce(func.sum(Challenge.points), 0).label("score"),
+                func.min(Submission.submitted_at).label("first_solve_at"),
+            )
+            .select_from(base.subquery())
+            .group_by(User.id, User.username)
+            .order_by(desc("score"), asc("first_solve_at"))
+            .limit(limit)
+        )
+    else:
+        # Aggregate by team (uses users.team_id per your current schema)
+        stmt = (
+            select(
+                Team.id.label("subject_id"),
+                Team.team_name.label("name"),
+                func.coalesce(func.sum(Challenge.points), 0).label("score"),
+                func.min(Submission.submitted_at).label("first_solve_at"),
+            )
+            .select_from(base.join(Team, Team.id == User.team_id).subquery())
+            .group_by(Team.id, Team.team_name)
+            .order_by(desc("score"), asc("first_solve_at"))
+            .limit(limit)
+        )
+
+    rows = (await db.execute(stmt)).all()
+
+    # Assign ranks with ties on (score, first_solve_at)
+    results = []
+    rank = 0
+    prev_key = None
+    for r in rows:
+        score = int(r.score or 0)
+        ts = r.first_solve_at
+        key = (score, ts)
+        if key != prev_key:
+            rank = len(results) + 1
+            prev_key = key
+        results.append({
+            "rank": rank,
+            "subject_type": type,
+            "subject_id": r.subject_id,
+            "name": r.name,
+            "score": score,
+            "first_solve_at": ts.isoformat() if ts else None
+        })
+
+    return {"type": type, "event_id": event_id, "results": results}
