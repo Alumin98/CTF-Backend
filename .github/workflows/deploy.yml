@@ -8,7 +8,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    # Make the token available to all steps
+    # Make your token available to all steps (no login step needed)
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
@@ -21,12 +21,10 @@ jobs:
           curl -fsSL https://railway.app/install.sh | sh
           echo "$HOME/.railway/bin" >> $GITHUB_PATH
 
-      # Tell the CLI which project to target
-      - name: Link project
-        run: railway link --project 643efe96-25d9-41cc-9f06-812b34fe9a5a
-       
+      # Optional sanity check: shows who the CLI is authenticated as
+      - name: Railway whoami
+        run: railway whoami || true
 
-      # Deploy your service (use the service ID to avoid name typos)
+      # Deploy directly — project/env come from railway.json
       - name: Deploy to Railway
         run: railway up --service ae8a39df-6af1-44c5-a12e-15efed38aff8 --ci
-       
