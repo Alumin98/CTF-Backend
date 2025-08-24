@@ -1,5 +1,6 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict, computed_field
+from typing import Optional
 
 class UserRegister(BaseModel):
     username: str
@@ -22,15 +23,34 @@ class UserProfile(BaseModel):
 class TeamCreate(BaseModel):
     name: str
 
-class TeamRead(BaseModel):
+class TeamReadPublic(BaseModel):
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    # raw DB name (not shown to users directly)
+    team_name: str
+    created_by: int
+    created_at: datetime
+    competition_id: Optional[int] = None
+    is_deleted: bool = False
+
+    def display_name(self) -> str:
+        return f"Deleted Team #{self.id}" if self.is_deleted else (self.team_name or "Unnamed Team")
+
+class TeamReadAdmin(BaseModel):
+
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     team_name: str
+    created_by: int
     created_at: datetime
+    competition_id: Optional[int] = None
+    is_deleted: bool = False
+    deleted_at: Optional[datetime] = None
+    deleted_by_user_id: Optional[int] = None
 
-    class Config:
-        from_attributes = True 
-
-#UPDATED
 class ChallengeCreate(BaseModel):
     title: str
     description: str
@@ -42,7 +62,6 @@ class ChallengeCreate(BaseModel):
     docker_image: str | None = None
     competition_id: int | None = None
 
-#UPDATED
 class ChallengePublic(BaseModel):
     id: int
     title: str
