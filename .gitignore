@@ -1,0 +1,9 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+dev.db
+.vscode/
+.DS_Store
+CTF-Backend/

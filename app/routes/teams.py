@@ -2,12 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from datetime import datetime, timezone
+
+from app.database import get_db
+from app.auth_token import get_current_user, require_admin  # <-- admin guard here
+
 from app.models.team import Team
 from app.models.user import User
 from app.models.submission import Submission
-from app.database import get_db
 from app.schemas import TeamCreate, TeamReadPublic, TeamReadAdmin, UserProfile
-from app.auth_token import get_current_user
+
 
 async def team_has_participated(db: AsyncSession, team_id: int) -> bool:
     """Check if a team has any submissions or is linked to a competition."""
@@ -32,8 +35,8 @@ def is_admin(user) -> bool:
     return getattr(user, "role", None) == "admin"
 
 
-async def ensure_can_delete_team(db, team: Team, user):
-    """Enforce deletion rules:
+async def ensure_can_delete_team(db: AsyncSession, team: Team, user: User):
+    """Deletion rules:
     - Admins can delete any team
     - Creator can delete only if the team has not participated
     """
@@ -42,19 +45,25 @@ async def ensure_can_delete_team(db, team: Team, user):
     if team.created_by != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only creator or admin can delete this team."
+            detail="Only creator or admin can delete this team.",
         )
     if await team_has_participated(db, team.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Creator cannot delete a team that has participated."
+            detail="Creator cannot delete a team that has participated.",
         )
 
 
 router = APIRouter()
 
-@router.post("/teams/", response_model=TeamReadPublic)
-async def create_team(team: TeamCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+
+@router.post("/teams/", response_model=TeamReadPublic, tags=["teams"])
+async def create_team(
+    team: TeamCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    # unique team name
     result = await db.execute(select(Team).where(Team.team_name == team.name))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Team name already exists")
@@ -65,26 +74,30 @@ async def create_team(team: TeamCreate, db: AsyncSession = Depends(get_db), user
     await db.refresh(new_team)
     return new_team
 
-@router.get("/teams/", response_model=list[TeamReadPublic])
-async def list_teams(db: AsyncSession = Depends(get_db), include_deleted: bool = False):
+
+@router.get("/teams/", response_model=list[TeamReadPublic], tags=["teams"])
+async def list_teams(
+    db: AsyncSession = Depends(get_db),
+    include_deleted: bool = False,
+):
     stmt = select(Team)
     if not include_deleted:
         stmt = stmt.where(Team.is_deleted == False)
     teams = (await db.execute(stmt)).scalars().all()
     return teams
 
-@router.post("/teams/{team_id}/join")
+
+@router.post("/teams/{team_id}/join", tags=["teams"])
 async def join_team(
     team_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     # Make sure team exists
     result = await db.execute(select(Team).where(Team.id == team_id))
     team = result.scalar_one_or_none()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
-    
 
     if team.is_deleted:
         raise HTTPException(status_code=400, detail="Team is deleted.")
@@ -105,17 +118,19 @@ async def join_team(
 
     return {"message": f"Joined team {team.team_name}"}
 
-@router.get("/teams/{team_id}/members", response_model=list[UserProfile])
+
+@router.get("/teams/{team_id}/members", response_model=list[UserProfile], tags=["teams"])
 async def get_team_members(team_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.team_id == team_id))
     members = result.scalars().all()
     return members
 
-@router.delete("/teams/{team_id}", status_code=204)
+
+@router.delete("/teams/{team_id}", status_code=204, tags=["teams"])
 async def delete_team(
     team_id: int,
     db: AsyncSession = Depends(get_db),
-    user = Depends(get_current_user)
+    user: User = Depends(get_current_user),
 ):
     res = await db.execute(select(Team).where(Team.id == team_id))
     team = res.scalar_one_or_none()
@@ -134,9 +149,11 @@ async def delete_team(
     await db.commit()
     return
 
-@router.get("/admin/teams/", response_model=list[TeamReadAdmin])
-async def admin_list_teams(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    if getattr(user, "role", None) != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+
+@router.get("/admin/teams/", response_model=list[TeamReadAdmin], tags=["admin"])
+async def admin_list_teams(
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_admin),  # enforce admin
+):
     teams = (await db.execute(select(Team))).scalars().all()
     return teams
