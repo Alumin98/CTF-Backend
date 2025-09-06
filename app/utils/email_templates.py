@@ -1,9 +1,8 @@
-
 import os
 
 def reset_link(token: str) -> str:
-    frontend = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    return f"{frontend.rstrip('/')}/reset-password?token={token}"
+    frontend = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+    return f"{frontend}/reset-password?token={token}"
 
 def reset_email_html(link: str) -> str:
     return f"""
