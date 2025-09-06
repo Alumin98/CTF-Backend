@@ -10,5 +10,7 @@ class User(Base):
     password_hash = Column("hashed_password", String, nullable=False)
     role = Column(String, default='player')
     team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
+    reset_token_hash = Column(String(64), nullable=True, index=True)
+    reset_token_expires_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime, default=func.now())

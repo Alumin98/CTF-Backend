@@ -29,6 +29,7 @@ from app.routes.teams import router as team_router
 from app.routes.challenges import router as challenge_router
 from app.routes.submissions import router as submission_router
 from app.routes import competition as competition_routes
+from app.routes.password_reset import router as password_reset_router
 
 # ----- FastAPI app -----
 app = FastAPI(
@@ -61,6 +62,7 @@ app.include_router(team_router)
 app.include_router(challenge_router)
 app.include_router(submission_router)
 app.include_router(competition_routes.router)
+app.include_router(password_reset_router)
 
 # ----- Startup: ensure tables exist -----
 @app.on_event("startup")
