@@ -10,7 +10,6 @@ from app.models.user import User
 from app.emailer import send_email
 from app.security_tokens import generate_reset_token, hash_token, constant_time_equals
 from app.email_templates import reset_link, reset_email_html
-from app.routes.auth import hashed_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
