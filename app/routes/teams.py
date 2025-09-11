@@ -158,7 +158,6 @@ async def delete_team(
     await ensure_can_delete_team(db, team, user)
 
     # Soft delete + rename to free the unique team_name
-    if members_count - 1 <= 0:
     team.team_name = f"deleted-team-{team.id}"
     team.is_deleted = True
     team.deleted_at = datetime.now(timezone.utc)
