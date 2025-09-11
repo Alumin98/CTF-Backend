@@ -34,6 +34,7 @@ class TeamReadPublic(BaseModel):
     created_at: datetime
     competition_id: Optional[int] = None
     is_deleted: bool = False
+    leader_id: Optional[int] = None
 
     def display_name(self) -> str:
         return f"Deleted Team #{self.id}" if self.is_deleted else (self.team_name or "Unnamed Team")
@@ -50,6 +51,7 @@ class TeamReadAdmin(BaseModel):
     is_deleted: bool = False
     deleted_at: Optional[datetime] = None
     deleted_by_user_id: Optional[int] = None
+    leader_id: Optional[int] = None
 
 class ChallengeCreate(BaseModel):
     title: str

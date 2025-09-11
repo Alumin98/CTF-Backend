@@ -12,4 +12,8 @@ class Team(Base):
     is_deleted = Column(Boolean, nullable=False, default=False)
     deleted_at = Column(DateTime(timezone=True))
     deleted_by_user_id = Column(Integer, ForeignKey("users.id"))
+    leader_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    leader = relationship("User", back_populates="leading_team", foreign_keys=[leader_id])
+    members = relationship("User", back_populates="team", foreign_keys="User.team_id")
 
