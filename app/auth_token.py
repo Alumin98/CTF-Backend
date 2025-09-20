@@ -11,9 +11,9 @@ from app.models.user import User
 
 load_dotenv()
 
-SECRET_KEY = os.getenv("JWT_SECRET")
-ALGORITHM = os.getenv("JWT_ALGORITHM")
-EXPIRY_MINUTES = int(os.getenv("JWT_EXPIRY_MINUTES"))
+SECRET_KEY = os.getenv("JWT_SECRET", "dev-secret-change-me")
+ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+EXPIRY_MINUTES = int(os.getenv("JWT_EXPIRY_MINUTES", "60"))
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 

@@ -1,20 +1,55 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker, declarative_base
-from dotenv import load_dotenv
+# app/database.py
+from __future__ import annotations
+
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+
+def _default_db_url() -> str:
+    """
+    Use a file-based SQLite DB at the project root when DATABASE_URL is not provided.
+    File-based SQLite works reliably across async connections and threads.
+    """
+    root = Path(__file__).resolve().parents[1]
+    return f"sqlite+aiosqlite:///{(root / 'test.db').as_posix()}"
+
+
+# Robust DATABASE_URL handling
+DATABASE_URL: str = os.getenv("DATABASE_URL") or _default_db_url()
+
+# Optional echo flag for local debugging
+ECHO = os.getenv("SQLALCHEMY_ECHO", "0").lower() in {"1", "true", "yes"}
+
+# Create async engine
+engine: AsyncEngine = create_async_engine(
+    DATABASE_URL,
+    echo=ECHO,
+    pool_pre_ping=True,
+)
+
+# IMPORTANT: expire_on_commit=False prevents lazy refresh after commit,
+# which avoids MissingGreenlet when a route reads ORM attributes
+# (e.g., team.team_name) after a commit within the same request.
 SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
     bind=engine,
     class_=AsyncSession,
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
 )
+
 Base = declarative_base()
 
+
 async def get_db():
-    async with SessionLocal() as db:
-        yield db
+    """
+    FastAPI dependency that yields an AsyncSession.
+    """
+    async with SessionLocal() as session:
+        yield session
