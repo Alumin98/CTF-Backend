@@ -1,10 +1,13 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Text
+from sqlalchemy import Column, Integer, Text, ForeignKey, Integer
+from sqlalchemy.orm import relationship
 from app.database import Base
 
 class Hint(Base):
     __tablename__ = "hints"
+    id = Column(Integer, primary_key=True)
+    challenge_id = Column(Integer, ForeignKey("challenges.id", ondelete="CASCADE"), nullable=False, index=True)
+    text = Column(Text, nullable=False)
+    penalty = Column(Integer, nullable=False, default=0)
+    order_index = Column(Integer, nullable=False, default=0)
 
-    id = Column(Integer, primary_key=True, index=True)
-    challenge_id = Column(Integer, ForeignKey("challenges.id"), nullable=False)
-    hint_text = Column(Text, nullable=False)
-    point_penalty = Column(Integer, default=0)
+    challenge = relationship("Challenge", back_populates="hints")

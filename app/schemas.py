@@ -1,30 +1,46 @@
+# app/schemas.py
+# ------------------------------------------------------------
+# Pydantic v2 schemas, organized by domain
+# ------------------------------------------------------------
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, ConfigDict, computed_field
-from typing import Optional
+from typing import Optional, List
+
+from pydantic import BaseModel, EmailStr, ConfigDict
+
+
+# ============================================================
+# Users
+# ============================================================
 
 class UserRegister(BaseModel):
     username: str
     email: EmailStr
     password: str
 
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+
 class UserProfile(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
     email: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+
+# ============================================================
+# Teams
+# ============================================================
 
 class TeamCreate(BaseModel):
     name: str
 
-class TeamReadPublic(BaseModel):
 
+class TeamReadPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -36,11 +52,12 @@ class TeamReadPublic(BaseModel):
     is_deleted: bool = False
     leader_id: Optional[int] = None
 
+    # convenience for UIs
     def display_name(self) -> str:
         return f"Deleted Team #{self.id}" if self.is_deleted else (self.team_name or "Unnamed Team")
 
-class TeamReadAdmin(BaseModel):
 
+class TeamReadAdmin(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -53,43 +70,147 @@ class TeamReadAdmin(BaseModel):
     deleted_by_user_id: Optional[int] = None
     leader_id: Optional[int] = None
 
-class ChallengeCreate(BaseModel):
+
+# ============================================================
+# Challenges (tags, hints, CRUD)
+# ============================================================
+
+# ---- Hints ----
+class HintCreate(BaseModel):
+    text: str
+    penalty: int = 0
+    order_index: int = 0
+
+
+class HintRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    text: str
+    penalty: int
+    order_index: int
+
+
+# ---- Challenge base / create / update ----
+class ChallengeBase(BaseModel):
     title: str
     description: str
     category_id: int
+    # static points kept for now; dynamic scoring can override at submission time
     points: int
-    flag: str
-    unlocked_by_id: int | None = None
-    difficulty: str | None = None
-    docker_image: str | None = None
-    competition_id: int | None = None
+    difficulty: Optional[str] = "easy"
+    docker_image: Optional[str] = None
+    competition_id: Optional[int] = None
+    unlocked_by_id: Optional[int] = None
+    # tags as simple strings stored via ChallengeTag rows
+    tags: List[str] = []
+    # optional visibility controls (match your model defaults)
+    is_active: Optional[bool] = True
+    is_private: Optional[bool] = False
+    visible_from: Optional[datetime] = None
+    visible_to: Optional[datetime] = None
 
+
+class ChallengeCreate(ChallengeBase):
+    # keep flag in write-only create model; do NOT expose in reads
+    flag: str
+    # nested hints
+    hints: List[HintCreate] = []
+
+
+class ChallengeUpdate(BaseModel):
+    # all optional; partial updates supported
+    title: Optional[str] = None
+    description: Optional[str] = None
+    category_id: Optional[int] = None
+    points: Optional[int] = None
+    difficulty: Optional[str] = None
+    docker_image: Optional[str] = None
+    competition_id: Optional[int] = None
+    unlocked_by_id: Optional[int] = None
+    tags: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+    is_private: Optional[bool] = None
+    visible_from: Optional[datetime] = None
+    visible_to: Optional[datetime] = None
+    # allow full replacement of hints if provided
+    hints: Optional[List[HintCreate]] = None
+    # allow updating flag (write-only). Don’t mirror back in any read model.
+    flag: Optional[str] = None
+
+
+# ---- Public/Admin read models (no flag exposure) ----
 class ChallengePublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     title: str
     description: str
     category_id: int
     points: int
+    difficulty: Optional[str] = None
     created_at: datetime
-    unlocked_by_id: int | None = None  
+    competition_id: Optional[int] = None
+    unlocked_by_id: Optional[int] = None
+    is_active: bool
+    is_private: bool
+    visible_from: Optional[datetime] = None
+    visible_to: Optional[datetime] = None
+    # derived / related
+    tags: List[str] = []
+    hints: List[HintRead] = []
+    solves_count: int = 0  # fill in route from related table
 
-    class Config:
-        from_attributes = True
+
+class ChallengeAdmin(BaseModel):
+    """
+    Same as public, but reserved for future admin-only fields
+    (we still do NOT expose the flag here).
+    """
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    description: str
+    category_id: int
+    points: int
+    difficulty: Optional[str] = None
+    created_at: datetime
+    competition_id: Optional[int] = None
+    unlocked_by_id: Optional[int] = None
+    is_active: bool
+    is_private: bool
+    visible_from: Optional[datetime] = None
+    visible_to: Optional[datetime] = None
+    tags: List[str] = []
+    hints: List[HintRead] = []
+    solves_count: int = 0
+
+
+# ============================================================
+# Submissions
+# ============================================================
 
 class FlagSubmission(BaseModel):
     challenge_id: int
     submitted_flag: str
+    # optional: capture revealed hints to calculate penalties at submit time
+    used_hint_ids: Optional[List[int]] = None
+
 
 class SubmissionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: int
     challenge_id: int
     submitted_hash: str
-    is_correct: bool  
+    is_correct: bool
     submitted_at: datetime
+    first_blood: bool | None = None
+    points_awarded: int | None = None
+    used_hint_ids: str | None = None  
 
-    class Config:
-        from_attributes = True
 
 class SubmissionResult(BaseModel):
     correct: bool
@@ -97,12 +218,15 @@ class SubmissionResult(BaseModel):
     score: int
 
 
+# ============================================================
+# Competitions
+# ============================================================
+
 class CompetitionCreate(BaseModel):
     name: str
 
-class CompetitionOut(CompetitionCreate):
-    id: int
 
-    class Config:
-        from_attributes = True
- 
+class CompetitionOut(CompetitionCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int

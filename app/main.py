@@ -26,7 +26,8 @@ from app.models import (  # noqa: F401 (imported for side effects)
 # ----- Routers -----
 from app.routes.auth import router as auth_router
 from app.routes.teams import router as team_router
-from app.routes.challenges import router as challenge_router
+from app.routes.challenges import router as challenge_router         # public challenges
+from app.routes.admin_challenges import admin as admin_chal_router   # NEW: admin challenges
 from app.routes.submissions import router as submission_router
 from app.routes import competition as competition_routes
 from app.routes.password_reset import router as password_reset_router
@@ -59,7 +60,8 @@ if raw_origins:
 # ----- Include routers -----
 app.include_router(auth_router, prefix="/auth")
 app.include_router(team_router)
-app.include_router(challenge_router)
+app.include_router(challenge_router)       # /challenges ...
+app.include_router(admin_chal_router)      # /admin/challenges ...   <-- added
 app.include_router(submission_router)
 app.include_router(competition_routes.router)
 app.include_router(password_reset_router)
@@ -76,7 +78,9 @@ async def on_startup():
 async def health():
     return {"ok": True}
 
-# ----- Example usage of env vars -----
-db_url = os.getenv("DATABASE_URL")
-jwt_secret = os.getenv("JWT_SECRET")
-logging.info(f"Loaded DATABASE_URL: {db_url}")
+# (Recommended) Avoid logging secrets like DATABASE_URL / JWT_SECRET
+# If you need to confirm they’re loaded, log booleans instead:
+if os.getenv("DATABASE_URL"):
+    logging.info("DATABASE_URL loaded.")
+if os.getenv("JWT_SECRET"):
+    logging.info("JWT_SECRET loaded.")
