@@ -93,21 +93,7 @@ async def submit_flag(
         )
         is_first_blood = False if fb_res.scalar_one_or_none() else True
 
-        # 5) Save submission (TEXT 'true'/'false' in DB)
-        new_sub = Submission(
-            user_id=user.id,
-            challenge_id=challenge.id,
-            submitted_hash=submitted_hash,
-            is_correct="true" if is_correct_bool else "false",
-            submitted_at=datetime.utcnow(),
-            first_blood=is_first_blood,
-            points_awarded=score_awarded if is_correct_bool else 0,
-            used_hint_ids=",".join(map(str, submission.used_hint_ids)) if submission.used_hint_ids else None, 
-        )
-        db.add(new_sub)
-        await db.commit()
-
-        # 6) Calculate score (not stored in DB, only returned)
+        # 5) Calculate score ahead of time so we can persist it
         score_awarded = 0
         if is_correct_bool:
             # count current solves
@@ -123,7 +109,7 @@ async def submit_flag(
             base = challenge.points or 100  # fallback if challenge.points is NULL
             min_points = 10
             decay = 10
-            points = dynamic_points(base, min_points, decay, n_solves - 1)
+            points = dynamic_points(base, min_points, decay, n_solves)
 
             # apply hint penalties
             penalties = []
@@ -134,6 +120,20 @@ async def submit_flag(
                 penalties = [h.penalty for h in hint_rows]
 
             score_awarded = apply_hint_penalty(points, penalties)
+
+        # 6) Save submission (TEXT 'true'/'false' in DB)
+        new_sub = Submission(
+            user_id=user.id,
+            challenge_id=challenge.id,
+            submitted_hash=submitted_hash,
+            is_correct="true" if is_correct_bool else "false",
+            submitted_at=datetime.utcnow(),
+            first_blood=is_first_blood,
+            points_awarded=score_awarded if is_correct_bool else 0,
+            used_hint_ids=",".join(map(str, submission.used_hint_ids)) if submission.used_hint_ids else None,
+        )
+        db.add(new_sub)
+        await db.commit()
 
         return {
             "correct": is_correct_bool,
