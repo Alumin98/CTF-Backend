@@ -1,3 +1,4 @@
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,11 +11,34 @@ from app.models.challenge import Challenge
 from app.models.hint import Hint
 from app.models.challenge_tag import ChallengeTag
 from app.models.submission import Submission  # used to count solves
+from app.routes.auth import hash_flag
 from app.schemas import (
     ChallengeCreate, ChallengeUpdate, ChallengeAdmin, HintCreate
 )
 
 admin = APIRouter(prefix="/admin/challenges", tags=["Admin: Challenges"])
+logger = logging.getLogger(__name__)
+
+
+def _looks_like_hashed_flag(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    if len(value) != 64:
+        return False
+    try:
+        int(value, 16)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _warn_if_plaintext_flag(ch: Challenge) -> None:
+    if ch.flag and not _looks_like_hashed_flag(ch.flag):
+        logger.warning(
+            "Challenge %s appears to store a plain-text flag. "
+            "Consider migrating existing records to hashed values.",
+            ch.id,
+        )
 
 def _is_admin(user: User) -> bool:
     # Adjust to your project (e.g., user.role == "admin")
@@ -71,7 +95,7 @@ async def create_challenge(
         visible_to=payload.visible_to,
         competition_id=payload.competition_id,
         unlocked_by_id=payload.unlocked_by_id,
-        flag=payload.flag,  # write-only; never returned in response
+        flag=hash_flag(payload.flag) if payload.flag is not None else None,
     )
     # hints
     for h in payload.hints or []:
@@ -149,7 +173,9 @@ async def update_challenge_admin(
 
     # flag update (write-only)
     if payload.flag is not None:
-        ch.flag = payload.flag
+        ch.flag = hash_flag(payload.flag)
+    else:
+        _warn_if_plaintext_flag(ch)
 
     # tags (full replace if provided)
     if payload.tags is not None:
