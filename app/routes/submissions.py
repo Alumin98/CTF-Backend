@@ -163,12 +163,11 @@ async def get_leaderboard(
     base_q = (
         select(
             Submission.user_id,
-            Submission.challenge_id,
-            func.max(Submission.submitted_at).label("first_solve_at"),
+            func.min(Submission.submitted_at).label("first_solve_at"),
             func.sum(Submission.points_awarded).label("points"),
         )
         .where(IS_CORRECT_TRUE)
-        .group_by(Submission.user_id, Submission.challenge_id)
+        .group_by(Submission.user_id)
     )
 
     # Scope by event if needed
@@ -180,34 +179,62 @@ async def get_leaderboard(
 
     rows = (await db.execute(base_q)).all()
 
+    user_ids = {r.user_id for r in rows}
+    users = (
+        await db.execute(select(User).where(User.id.in_(user_ids)))
+        if user_ids
+        else None
+    )
+    user_map = {u.id: u for u in (users.scalars().all() if users else [])}
+
     results = []
     if type == "user":
         for r in rows:
-            u = await db.get(User, r.user_id)
+            u = user_map.get(r.user_id)
             results.append(
                 {
                     "subject_type": "user",
                     "subject_id": r.user_id,
                     "name": u.username if u else f"User {r.user_id}",
                     "score": int(r.points or 0),
-                    "first_solve_at": r.first_solve_at.isoformat() if r.first_solve_at else None,
+                    "first_solve_at": r.first_solve_at,
                 }
             )
     else:  # team
+        team_totals: dict[int, dict] = {}
         for r in rows:
-            u = await db.get(User, r.user_id)
+            u = user_map.get(r.user_id)
             if not u or not u.team_id:
                 continue
-            t = await db.get(Team, u.team_id)
-            results.append(
+
+            team_entry = team_totals.setdefault(
+                u.team_id,
                 {
                     "subject_type": "team",
                     "subject_id": u.team_id,
-                    "name": t.team_name if t else f"Team {u.team_id}",
-                    "score": int(r.points or 0),
-                    "first_solve_at": r.first_solve_at.isoformat() if r.first_solve_at else None,
-                }
+                    "name": None,
+                    "score": 0,
+                    "first_solve_at": None,
+                },
             )
+
+            team_entry["score"] += int(r.points or 0)
+            if r.first_solve_at:
+                if not team_entry["first_solve_at"] or r.first_solve_at < team_entry["first_solve_at"]:
+                    team_entry["first_solve_at"] = r.first_solve_at
+
+        team_ids = list(team_totals.keys())
+        teams = (
+            await db.execute(select(Team).where(Team.id.in_(team_ids)))
+            if team_ids
+            else None
+        )
+        team_map = {t.id: t for t in (teams.scalars().all() if teams else [])}
+
+        for team_id, entry in team_totals.items():
+            team = team_map.get(team_id)
+            entry["name"] = team.team_name if team else f"Team {team_id}"
+            results.append(entry)
 
     # Rank results
     results.sort(key=lambda x: (-x["score"], x["first_solve_at"] or datetime.max))
@@ -217,6 +244,9 @@ async def get_leaderboard(
         if key != prev_key:
             rank = len(ranked) + 1
             prev_key = key
-        ranked.append({**r, "rank": rank})
+        first_solve = r["first_solve_at"]
+        if isinstance(first_solve, datetime):
+            first_solve = first_solve.isoformat()
+        ranked.append({**r, "first_solve_at": first_solve, "rank": rank})
 
     return {"type": type, "event_id": event_id, "results": ranked[:limit]}
