@@ -17,8 +17,18 @@ from app.schemas import (
 admin = APIRouter(prefix="/admin/challenges", tags=["Admin: Challenges"])
 
 def _is_admin(user: User) -> bool:
-    # Adjust to your project (e.g., user.role == "admin")
-    return bool(getattr(user, "is_admin", False) or getattr(user, "is_superuser", False))
+    """Return True when the current user should be treated as an admin."""
+
+    role = getattr(user, "role", None)
+    if isinstance(role, str) and role.lower() == "admin":
+        return True
+
+    # Legacy flags (older deployments may still rely on these attributes).
+    for legacy_flag in ("is_admin", "is_superuser"):
+        if getattr(user, legacy_flag, False):
+            return True
+
+    return False
 
 async def require_admin(user: User = Depends(get_current_user)) -> User:
     if not _is_admin(user):
