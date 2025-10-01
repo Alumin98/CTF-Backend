@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+import hmac
+import os
+
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from fastapi.security import OAuth2PasswordRequestForm
@@ -60,10 +63,32 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
 
 @router.post("/make-me-admin")
 async def make_me_admin(
+    payload: dict = Body(...),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    # Promote the user
+    """Bootstrap route for promoting a user to admin.
+
+    The route is disabled by default. To enable it for an initial
+    bootstrap, set the environment variable ``ENABLE_ADMIN_BOOTSTRAP`` to a
+    truthy value and provide a matching ``ADMIN_BOOTSTRAP_TOKEN``. Requests
+    must include the token in the JSON body as ``{"token": "..."}``.
+    """
+
+    if not os.getenv("ENABLE_ADMIN_BOOTSTRAP", "").lower() in {"1", "true", "yes"}:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    bootstrap_token = os.getenv("ADMIN_BOOTSTRAP_TOKEN")
+    if not bootstrap_token:
+        raise HTTPException(status_code=403, detail="Admin bootstrap disabled")
+
+    provided_token = payload.get("token")
+    if not provided_token or not hmac.compare_digest(provided_token, bootstrap_token):
+        raise HTTPException(status_code=403, detail="Invalid bootstrap token")
+
+    if user.role == "admin":
+        return {"message": "User is already an admin"}
+
     user.role = "admin"
     db.add(user)
     await db.commit()
