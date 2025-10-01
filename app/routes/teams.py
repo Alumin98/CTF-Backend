@@ -245,7 +245,7 @@ async def transfer_leadership(
         )
 
     # Only current leader or admin may transfer
-    if getattr(current_user, "is_admin", False) is not True and team.leader_id != current_user.id:
+    if not is_admin(current_user) and team.leader_id != current_user.id:
         raise HTTPException(status_code=403, detail="Only the team leader or an admin can transfer leadership.")
 
     new_leader = await db.get(User, new_leader_user_id)
