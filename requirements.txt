@@ -7,4 +7,5 @@ email-validator
 python-multipart
 passlib[argon2]
 asyncpg
+aiosqlite
 argon2-cffi
