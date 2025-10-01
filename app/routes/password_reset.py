@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.user import User
 from app.emailer import send_email
+from app.security import pwd_context
 from app.security_tokens import generate_reset_token, hash_token, constant_time_equals
 from app.email_templates import reset_link, reset_email_html
 
@@ -63,7 +64,7 @@ async def reset_password(
     if not constant_time_equals(user.reset_token_hash, token_hash):
         raise HTTPException(status_code=400, detail="Invalid or expired token.")
 
-    user.hashed_password = hashed_password(body.new_password)  # <-- Argon2
+    user.password_hash = pwd_context.hash(body.new_password)
     user.reset_token_hash = None
     user.reset_token_expires_at = None
     await db.commit()
