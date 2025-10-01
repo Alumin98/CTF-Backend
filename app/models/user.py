@@ -1,6 +1,12 @@
+from typing import TYPE_CHECKING
+
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, func
 from sqlalchemy.orm import relationship
+
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.submission import Submission
 
 class User(Base):
     __tablename__ = "users"
@@ -16,6 +22,12 @@ class User(Base):
     created_at = Column(DateTime, default=func.now())
 
     team = relationship("Team", back_populates="members", foreign_keys=[team_id])
+    submissions = relationship("Submission", back_populates="user", lazy="selectin")
 
     # NEW: if user is leader of a team
-    leading_team = relationship("Team", back_populates="leader", uselist=False, foreign_keys="Team.leader_id")
+    leading_team = relationship(
+        "Team",
+        back_populates="leader",
+        uselist=False,
+        foreign_keys="Team.leader_id",
+    )
