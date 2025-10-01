@@ -161,7 +161,7 @@ async def delete_team(
     team.team_name = f"deleted-team-{team.id}"
     team.is_deleted = True
     team.deleted_at = datetime.now(timezone.utc)
-    team.deleted_by_user_id = current_user.id
+    team.deleted_by_user_id = user.id
     db.add(team)
 
     result = await db.execute(select(User).where(User.team_id == team_id))
