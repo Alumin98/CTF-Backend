@@ -46,6 +46,13 @@ class Challenge(Base):
         lazy="selectin",
     )
 
+    # Submissions referencing this challenge
+    submissions = relationship(
+        "Submission",
+        back_populates="challenge",
+        lazy="selectin",
+    )
+
     # OPTIONAL: if you have a parent->children unlock chain:
     # children = relationship("Challenge", remote_side=[id])
 

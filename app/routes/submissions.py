@@ -5,7 +5,7 @@ from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, asc, cast, Boolean
+from sqlalchemy import select, func
 
 from app.database import get_db
 from app.auth_token import get_current_user
@@ -69,7 +69,7 @@ async def submit_flag(
             select(Submission.id).where(
                 Submission.user_id == user.id,
                 Submission.challenge_id == submission.challenge_id,
-                cast(Submission.is_correct, Boolean) == True,
+                func.lower(Submission.is_correct) == "true",
             )
         )
         if solved_res.scalar_one_or_none():
@@ -87,13 +87,14 @@ async def submit_flag(
         fb_res = await db.execute(
             select(Submission.id).where(
                 Submission.challenge_id == challenge.id,
-                cast(Submission.is_correct, Boolean) == True,
+                func.lower(Submission.is_correct) == "true",
                 Submission.first_blood == True,
             )
         )
         is_first_blood = False if fb_res.scalar_one_or_none() else True
 
         # 5) Save submission (TEXT 'true'/'false' in DB)
+        score_awarded = 0
         new_sub = Submission(
             user_id=user.id,
             challenge_id=challenge.id,
@@ -101,20 +102,19 @@ async def submit_flag(
             is_correct="true" if is_correct_bool else "false",
             submitted_at=datetime.utcnow(),
             first_blood=is_first_blood,
-            points_awarded=score_awarded if is_correct_bool else 0,
-            used_hint_ids=",".join(map(str, submission.used_hint_ids)) if submission.used_hint_ids else None, 
+            points_awarded=0,
+            used_hint_ids=",".join(map(str, submission.used_hint_ids)) if submission.used_hint_ids else None,
         )
         db.add(new_sub)
-        await db.commit()
+        await db.flush()
 
-        # 6) Calculate score (not stored in DB, only returned)
-        score_awarded = 0
+        # 6) Calculate score and persist it for leaderboard aggregation
         if is_correct_bool:
             # count current solves
             n_res = await db.execute(
                 select(func.count(Submission.id)).where(
                     Submission.challenge_id == challenge.id,
-                    cast(Submission.is_correct, Boolean) == True,
+                    func.lower(Submission.is_correct) == "true",
                 )
             )
             n_solves = n_res.scalar_one() or 0
@@ -134,6 +134,11 @@ async def submit_flag(
                 penalties = [h.penalty for h in hint_rows]
 
             score_awarded = apply_hint_penalty(points, penalties)
+
+            # Persist points on the submission before committing
+            new_sub.points_awarded = score_awarded
+
+        await db.commit()
 
         return {
             "correct": is_correct_bool,
@@ -157,7 +162,7 @@ async def get_leaderboard(
     event_id: Optional[int] = None,
     limit: int = 100,
 ):
-    IS_CORRECT_TRUE = cast(Submission.is_correct, Boolean) == True
+    IS_CORRECT_TRUE = func.lower(Submission.is_correct) == "true"
 
     # Use stored points_awarded
     base_q = (

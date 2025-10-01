@@ -1,6 +1,8 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, func
 from sqlalchemy.orm import relationship
+
 from app.database import Base
+
 
 class User(Base):
     __tablename__ = "users"
@@ -9,7 +11,7 @@ class User(Base):
     username = Column(String, unique=True, nullable=False)
     email = Column(String, unique=True)
     password_hash = Column("hashed_password", String, nullable=False)
-    role = Column(String, default='player')
+    role = Column(String, default="player")
     team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
     reset_token_hash = Column(String(64), nullable=True, index=True)
     reset_token_expires_at = Column(DateTime(timezone=True), nullable=True)
@@ -18,4 +20,16 @@ class User(Base):
     team = relationship("Team", back_populates="members", foreign_keys=[team_id])
 
     # NEW: if user is leader of a team
-    leading_team = relationship("Team", back_populates="leader", uselist=False, foreign_keys="Team.leader_id")
+    leading_team = relationship(
+        "Team",
+        back_populates="leader",
+        uselist=False,
+        foreign_keys="Team.leader_id",
+    )
+
+    # Track submissions solved by the user
+    submissions = relationship(
+        "Submission",
+        back_populates="user",
+        lazy="selectin",
+    )
