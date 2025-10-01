@@ -1,5 +1,8 @@
+from typing import TYPE_CHECKING
+
 from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, DateTime, func
 from sqlalchemy.orm import relationship
+
 from app.database import Base
 
 # NOTE: these imports are only for type/relationship wiring; no schema changes
@@ -8,6 +11,9 @@ from app.database import Base
 # - app/models/hint.py defines Hint with back_populates="challenge"
 from app.models.challenge_tag import ChallengeTag  # provides .tag and challenge_id FK
 from app.models.hint import Hint                   # provides text/penalty/order_index and challenge_id FK
+
+if TYPE_CHECKING:
+    from app.models.submission import Submission
 
 
 class Challenge(Base):
@@ -45,6 +51,8 @@ class Challenge(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+
+    submissions = relationship("Submission", back_populates="challenge", lazy="selectin")
 
     # OPTIONAL: if you have a parent->children unlock chain:
     # children = relationship("Challenge", remote_side=[id])
