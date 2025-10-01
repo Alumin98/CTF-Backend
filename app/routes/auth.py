@@ -1,20 +1,14 @@
-import hmac
-import os
 
-from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from fastapi.security import OAuth2PasswordRequestForm
-from app.models.user import User
-from app.schemas import UserRegister, UserLogin, UserProfile
+
+from app.auth_token import create_access_token, get_current_user
 from app.database import get_db
-from app.auth_token import get_current_user, create_access_token
-from passlib.context import CryptContext
-import hashlib
+from app.models.user import User
+from app.schemas import UserLogin, UserProfile, UserRegister
+from app.security import pwd_context
 
 router = APIRouter()
-
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 def hash_flag(flag: str) -> str:
     return hashlib.sha256(flag.encode("utf-8")).hexdigest()
