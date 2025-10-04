@@ -1,8 +1,9 @@
 from typing import List, Optional
 from datetime import datetime, timezone
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, cast, Boolean  # <-- added cast, Boolean
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -22,11 +23,12 @@ router = APIRouter(prefix="/challenges", tags=["Challenges"])
 # Helpers
 # -----------------------------
 async def _solves_count(db: AsyncSession, challenge_id: int) -> int:
+    # Your DB stores is_correct as TEXT ('true'/'false'); cast to Boolean for correctness.
     q = select(func.count(Submission.id)).where(
         Submission.challenge_id == challenge_id,
-        Submission.is_correct == True,  # noqa: E712
+        cast(Submission.is_correct, Boolean) == True,  # noqa: E712
     )
-    return (await db.execute(q)).scalar_one()
+    return (await db.execute(q)).scalar_one() or 0
 
 
 def _to_public_schema(ch: Challenge, solves: int) -> ChallengePublic:
@@ -56,6 +58,17 @@ def _to_aware(dt):
     if dt is None:
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _parse_iso8601(s: Optional[str]) -> Optional[datetime]:
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s)
+    except Exception:
+        return None
 
 
 # -----------------------------
@@ -145,20 +158,35 @@ async def get_challenge_solvers(
     challenge_id: int,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
+    freeze_until: Optional[str] = Query(
+        None,
+        description="Anti-cheat: ISO-8601 UTC timestamp. Solves after this are hidden. "
+                    "If omitted, uses SCOREBOARD_FREEZE_AT env var if set.",
+    ),
 ):
     """
     List solvers for a challenge in solve order (first blood first).
+    Anti-cheat: hide solves after the freeze time if provided.
     """
+    freeze = _parse_iso8601(freeze_until) or _parse_iso8601(os.getenv("SCOREBOARD_FREEZE_AT"))
+
     stmt = (
         select(Submission, User, Team)
         .join(User, Submission.user_id == User.id)
         .join(Team, User.team_id == Team.id, isouter=True)
-        .where(Submission.challenge_id == challenge_id, Submission.is_correct == True)  # noqa: E712
+        .where(
+            Submission.challenge_id == challenge_id,
+            cast(Submission.is_correct, Boolean) == True,  # noqa: E712
+        )
         .order_by(Submission.submitted_at.asc())
     )
+
+    if freeze is not None:
+        stmt = stmt.where(Submission.submitted_at <= freeze)
+
     rows = (await db.execute(stmt)).all()
 
-    # mark first_blood on the earliest correct submission, if any
+    # mark first_blood on the earliest correct submission, if any (within freeze window if applied)
     first_blood_seen = False
     out = []
     for submission, user, team in rows:
