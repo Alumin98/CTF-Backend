@@ -20,7 +20,7 @@ logging.basicConfig(
 from app.models import (  # noqa: F401 (imported for side effects)
     user, role, team, team_member, category, challenge,
     challenge_tag, event, hint, event_challenge,
-    submission, activity_log, admin_action, competition
+    submission, activity_log, admin_action, competition, achievement
 )
 
 # ----- Routers -----
@@ -31,6 +31,7 @@ from app.routes.admin_challenges import admin as admin_chal_router   # NEW: admi
 from app.routes.submissions import router as submission_router
 from app.routes import competition as competition_routes
 from app.routes.password_reset import router as password_reset_router
+from app.routes.scoreboard import router as scoreboard_router
 
 # ----- FastAPI app -----
 app = FastAPI(
@@ -61,10 +62,11 @@ if raw_origins:
 app.include_router(auth_router, prefix="/auth")
 app.include_router(team_router)
 app.include_router(challenge_router)       # /challenges ...
-app.include_router(admin_chal_router)      # /admin/challenges ...   <-- added
+app.include_router(admin_chal_router)      
 app.include_router(submission_router)
 app.include_router(competition_routes.router)
 app.include_router(password_reset_router)
+app.include_router(scoreboard_router)
 
 # ----- Startup: ensure tables exist -----
 @app.on_event("startup")
