@@ -230,3 +230,17 @@ class CompetitionOut(CompetitionCreate):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+
+# --- Achievements ---
+class AchievementRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: int
+    type: str
+    challenge_id: int | None = None
+    category_id: int | None = None
+    details: str | None = None
+    points_at_award: int | None = None
+    awarded_at: datetime
+

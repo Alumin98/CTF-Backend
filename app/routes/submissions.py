@@ -2,10 +2,11 @@
 
 from datetime import datetime
 from typing import Optional, Literal
+import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, asc, cast, Boolean
+from sqlalchemy import select, func, desc, asc, cast, Boolean, insert
 
 from app.database import get_db
 from app.auth_token import get_current_user
@@ -17,6 +18,7 @@ from app.models.hint import Hint
 from app.models.user import User
 from app.models.team import Team
 from app.models.event_challenge import EventChallenge
+from app.models.achievement import Achievement, AchievementType  # <-- NEW
 
 from app.schemas import FlagSubmission, SubmissionResult
 
@@ -47,7 +49,7 @@ def apply_hint_penalty(points: int, penalties: list[int]) -> int:
 
 
 # -------------------------------------------------------------------
-# POST /submit – record a submission
+# POST /submit – record a submission (+ achievements)
 # -------------------------------------------------------------------
 @router.post("/submit/", response_model=SubmissionResult)
 async def submit_flag(
@@ -83,7 +85,7 @@ async def submit_flag(
         submitted_hash = hash_flag(submission.submitted_flag)
         is_correct_bool = (submitted_hash == challenge.flag)
 
-        # 4) First blood?
+        # 4) First blood? (before inserting ours)
         fb_res = await db.execute(
             select(Submission.id).where(
                 Submission.challenge_id == challenge.id,
@@ -96,7 +98,7 @@ async def submit_flag(
         # 5) Calculate score ahead of time so we can persist it
         score_awarded = 0
         if is_correct_bool:
-            # count current solves
+            # count current correct solves (BEFORE this one)
             n_res = await db.execute(
                 select(func.count(Submission.id)).where(
                     Submission.challenge_id == challenge.id,
@@ -135,6 +137,45 @@ async def submit_flag(
         db.add(new_sub)
         await db.commit()
 
+        # 7) Achievements (best-effort; ignore unique errors)
+        if is_correct_bool:
+            # FIRST BLOOD
+            if is_first_blood:
+                try:
+                    await db.execute(
+                        insert(Achievement).values(
+                            user_id=user.id,
+                            type=AchievementType.FIRST_BLOOD,
+                            challenge_id=challenge.id,
+                            category_id=None,
+                            details="First correct solver",
+                            points_at_award=score_awarded,
+                        )
+                    )
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+
+            # FAST SOLVER (within N minutes of visible_from)
+            fast_minutes = int(os.getenv("FAST_SOLVER_MINUTES", "10"))
+            if challenge.visible_from:
+                delta = new_sub.submitted_at - challenge.visible_from
+                if delta.total_seconds() <= fast_minutes * 60:
+                    try:
+                        await db.execute(
+                            insert(Achievement).values(
+                                user_id=user.id,
+                                type=AchievementType.FAST_SOLVER,
+                                challenge_id=challenge.id,
+                                category_id=challenge.category_id,
+                                details=f"Solved within {fast_minutes} minutes",
+                                points_at_award=score_awarded,
+                            )
+                        )
+                        await db.commit()
+                    except Exception:
+                        await db.rollback()
+
         return {
             "correct": is_correct_bool,
             "message": "Correct!" if is_correct_bool else "Incorrect flag.",
@@ -159,7 +200,7 @@ async def get_leaderboard(
 ):
     IS_CORRECT_TRUE = cast(Submission.is_correct, Boolean) == True
 
-    # Use stored points_awarded
+    # Use stored points_awarded, grouped by user (your /submit prevents duplicates per challenge)
     base_q = (
         select(
             Submission.user_id,
@@ -236,7 +277,7 @@ async def get_leaderboard(
             entry["name"] = team.team_name if team else f"Team {team_id}"
             results.append(entry)
 
-    # Rank results
+    # Rank results (score desc, tiebreak earliest solve)
     results.sort(key=lambda x: (-x["score"], x["first_solve_at"] or datetime.max))
     ranked, prev_key, rank = [], None, 0
     for r in results:
