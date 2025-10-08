@@ -1,33 +1,72 @@
 import asyncio
+import importlib
 import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+# ---------------------------------------------------------------------------
+# Provide a lightweight stub for the optional aiosqlite dependency so the real
+# ``app.database`` module can be imported without pulling in heavy async
+# dependencies during test collection.
+# ---------------------------------------------------------------------------
+fake_aiosqlite = types.ModuleType("aiosqlite")
+
+
+class _FakeConnection:
+    async def cursor(self):  # pragma: no cover - compatibility shim
+        return self
+
+    async def execute(self, *args, **kwargs):  # noqa: ARG002 - compat shim
+        return None
+
+    async def fetchone(self):
+        return None
+
+    async def fetchall(self):
+        return []
+
+    async def commit(self):
+        return None
+
+    async def rollback(self):
+        return None
+
+    async def close(self):
+        return None
+
+
+def _fake_connect(*args, **kwargs):  # noqa: ARG001 - compatibility shim
+    return _FakeConnection()
+
+
+fake_aiosqlite.connect = _fake_connect
+fake_aiosqlite.Error = Exception
+fake_aiosqlite.Warning = Exception
+fake_aiosqlite.DatabaseError = Exception
+fake_aiosqlite.IntegrityError = Exception
+fake_aiosqlite.ProgrammingError = Exception
+fake_aiosqlite.OperationalError = Exception
+fake_aiosqlite.InterfaceError = Exception
+fake_aiosqlite.InternalError = Exception
+fake_aiosqlite.NotSupportedError = Exception
+fake_aiosqlite.DataError = Exception
+fake_aiosqlite.apilevel = "2.0"
+fake_aiosqlite.threadsafety = 1
+fake_aiosqlite.paramstyle = "qmark"
+fake_aiosqlite.sqlite_version = "3.0.0"
+fake_aiosqlite.sqlite_version_info = (3, 0, 0)
+fake_aiosqlite.version = "0.0"
+fake_aiosqlite.version_info = (0, 0, 0)
+sys.modules.setdefault("aiosqlite", fake_aiosqlite)
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
-
-# ---------------------------------------------------------------------------
-# Minimal stubs to avoid importing heavy async SQLAlchemy dependencies
-# ---------------------------------------------------------------------------
-if "app.database" not in sys.modules:
-    fake_database = types.ModuleType("app.database")
-
-    async def _fake_get_db():  # pragma: no cover - dependency placeholder
-        yield None
-
-    fake_database.get_db = _fake_get_db
-    sys.modules["app.database"] = fake_database
-
-
-def _install_model_stub(module_name: str, attrs: dict) -> None:
-    module = types.ModuleType(module_name)
-    for key, value in attrs.items():
-        setattr(module, key, value)
-    sys.modules[module_name] = module
+from app.routes.auth import hash_flag  # noqa: E402
+from app.schemas import ChallengeCreate  # noqa: E402
 
 
 class _ChallengeStub:
@@ -80,21 +119,21 @@ class _UserStub:
         self.is_superuser = is_superuser
 
 
-_install_model_stub(
-    "app.models.challenge",
-    {
-        "Challenge": _ChallengeStub,
-    },
-)
-_install_model_stub("app.models.hint", {"Hint": _HintStub})
-_install_model_stub("app.models.challenge_tag", {"ChallengeTag": _ChallengeTagStub})
-_install_model_stub("app.models.submission", {"Submission": _SubmissionStub})
-_install_model_stub("app.models.user", {"User": _UserStub})
+def _install_model_stub(module_name: str, attrs: dict):
+    previous = sys.modules.get(module_name)
+    module = types.ModuleType(module_name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    sys.modules[module_name] = module
+    return previous
 
 
-from app.routes.admin_challenges import create_challenge  # noqa: E402
-from app.routes.auth import hash_flag  # noqa: E402
-from app.schemas import ChallengeCreate  # noqa: E402
+def _restore_modules(originals: dict[str, types.ModuleType | None]) -> None:
+    for name, previous in originals.items():
+        if previous is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
 
 
 class _FakeResult:
@@ -132,15 +171,58 @@ def test_new_challenge_stores_hashed_flag():
             flag=plain_flag,
         )
 
-        with patch("app.routes.admin_challenges.Challenge", _ChallengeStub), patch(
-            "app.routes.admin_challenges._to_admin_schema",
-            side_effect=lambda ch, solves: SimpleNamespace(id=ch.id, solves=solves),
-        ), patch(
-            "app.routes.admin_challenges._solves_count",
-            new=AsyncMock(return_value=0),
-        ) as solves_mock:
-            result = await create_challenge(payload, session, None)
+        originals = {
+            "app.models.challenge": _install_model_stub(
+                "app.models.challenge",
+                {
+                    "Challenge": _ChallengeStub,
+                },
+            ),
+            "app.models.hint": _install_model_stub(
+                "app.models.hint",
+                {
+                    "Hint": _HintStub,
+                },
+            ),
+            "app.models.challenge_tag": _install_model_stub(
+                "app.models.challenge_tag",
+                {
+                    "ChallengeTag": _ChallengeTagStub,
+                },
+            ),
+            "app.models.submission": _install_model_stub(
+                "app.models.submission",
+                {
+                    "Submission": _SubmissionStub,
+                },
+            ),
+            "app.models.user": _install_model_stub(
+                "app.models.user",
+                {
+                    "User": _UserStub,
+                },
+            ),
+        }
 
+        solves_mock = None
+        try:
+            admin_module = importlib.import_module("app.routes.admin_challenges")
+
+            with patch.object(admin_module, "Challenge", _ChallengeStub), patch.object(
+                admin_module,
+                "_to_admin_schema",
+                side_effect=lambda ch, solves: SimpleNamespace(id=ch.id, solves=solves),
+            ), patch.object(
+                admin_module,
+                "_solves_count",
+                new=AsyncMock(return_value=0),
+            ) as solves_mock:
+                result = await admin_module.create_challenge(payload, session, None)
+        finally:
+            sys.modules.pop("app.routes.admin_challenges", None)
+            _restore_modules(originals)
+
+        assert solves_mock is not None
         solves_mock.assert_awaited_once()
         assert session.flush.await_count == 1
         assert session.commit.await_count == 1
