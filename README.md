@@ -44,11 +44,18 @@ If no challenge containers are present you can ignore that profile; the core sta
 ## Environment
 `.env.docker` is loaded into the backend container.
 ```
-DATABASE_URL=postgresql+asyncpg://ctf_user:ctf_pass@db:5432/ctf_db
+DATABASE_URL=postgresql://postgres:crDJrMIjfkHEZDuElDBFMIduQtsHAksF@nozomi.proxy.rlwy.net:38969/railway
 JWT_SECRET=supersecretfortheCTF
 JWT_ALGORITHM=HS256
 JWT_EXPIRY_MINUTES=60
 ```
+
+> **Note**
+> The backend normalises `postgresql://` URLs to `postgresql+asyncpg://` automatically, so the
+> Railway connection string above works out of the box. If you prefer to run against the bundled
+> Postgres container instead, replace the value with
+> `postgresql+asyncpg://ctf_user:ctf_pass@db:5432/ctf_db` and run `docker compose down -v` before
+> restarting so a fresh local database is created.
 
 You can tweak database boot timing with optional overrides:
 
@@ -56,6 +63,24 @@ You can tweak database boot timing with optional overrides:
 DB_INIT_MAX_ATTEMPTS=10      # how many connection retries before giving up
 DB_INIT_RETRY_SECONDS=1.0    # base delay (seconds) between retries; doubles each time up to 8s
 ```
+
+### Running without Docker
+If you prefer to launch the API directly with `uvicorn`, make sure a PostgreSQL
+instance is already accepting connections on the URL defined in `DATABASE_URL`.
+For local testing you can run just the database service from compose:
+
+```powershell
+# start postgres only
+docker compose up db
+
+# in a separate terminal set DATABASE_URL accordingly and start uvicorn
+$Env:DATABASE_URL = "postgresql+asyncpg://ctf_user:ctf_pass@localhost:5432/ctf_db"
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Alternatively, point `DATABASE_URL` to an existing PostgreSQL deployment. The
+application will keep retrying the connection during startup but will now fail
+hard if the database remains unreachable, matching production expectations.
 
 ## Auth Flow Examples
 ```bash
