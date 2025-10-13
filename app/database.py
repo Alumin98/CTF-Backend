@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -21,7 +22,23 @@ def _default_db_url() -> str:
 
 
 # Robust DATABASE_URL handling
-DATABASE_URL: str = os.getenv("DATABASE_URL") or _default_db_url()
+
+
+def _normalize_database_url(raw_url: Optional[str]) -> Optional[str]:
+    """Ensure async-friendly drivers even if the URL omits them."""
+
+    if not raw_url:
+        return raw_url
+
+    lowered = raw_url.lower()
+    for prefix in ("postgresql+psycopg2://", "postgresql://", "postgres://"):
+        if lowered.startswith(prefix):
+            return "postgresql+asyncpg://" + raw_url.split("://", 1)[1]
+
+    return raw_url
+
+
+DATABASE_URL: str = _normalize_database_url(os.getenv("DATABASE_URL")) or _default_db_url()
 
 # Optional echo flag for local debugging
 ECHO = os.getenv("SQLALCHEMY_ECHO", "0").lower() in {"1", "true", "yes"}
