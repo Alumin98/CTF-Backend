@@ -6,9 +6,9 @@ from dotenv import load_dotenv  # load .env variables
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 
-from app.database import Base, engine
+from app import database
 
 # ----- Load environment variables -----
 load_dotenv()
@@ -79,13 +79,45 @@ async def on_startup():
     max_attempts = int(os.getenv("DB_INIT_MAX_ATTEMPTS", "10"))
     base_delay = float(os.getenv("DB_INIT_RETRY_SECONDS", "1.0"))
 
+    allow_sqlite_fallback = os.getenv("DB_ALLOW_SQLITE_FALLBACK", "1").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    fallback_after_attempts = max(
+        1,
+        int(os.getenv("DB_FALLBACK_AFTER_ATTEMPTS", "1")),
+    )
+
     attempt = 0
     while True:
         attempt += 1
         try:
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-        except OperationalError as exc:  # pragma: no cover - depends on timing
+            async with database.engine.begin() as conn:
+                await conn.run_sync(database.Base.metadata.create_all)
+        except (OperationalError, DBAPIError, OSError) as exc:  # pragma: no cover - depends on timing
+            using_sqlite_already = (
+                database.CURRENT_DATABASE_URL == database.DEFAULT_SQLITE_URL
+            )
+
+            if (
+                allow_sqlite_fallback
+                and not using_sqlite_already
+                and attempt >= fallback_after_attempts
+            ):
+                logging.error(
+                    "Database not reachable at %s after %s attempts: %s."
+                    " Falling back to local SQLite for development.",
+                    database.CURRENT_DATABASE_URL,
+                    attempt,
+                    exc,
+                )
+                await database.engine.dispose()
+                database.configure_engine(database.DEFAULT_SQLITE_URL)
+                attempt = 0
+                continue
+
             if attempt >= max_attempts:
                 logging.exception("Database not reachable after %s attempts", attempt)
                 raise
@@ -100,7 +132,10 @@ async def on_startup():
             )
             await asyncio.sleep(wait_time)
         else:
-            logging.info("CTF backend API started and database tables ensured.")
+            logging.info(
+                "CTF backend API started and database tables ensured (using %s).",
+                database.CURRENT_DATABASE_URL,
+            )
             break
 
 # ----- Health check endpoint -----
