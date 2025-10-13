@@ -1,9 +1,12 @@
+import asyncio
 import logging
 import os
 from dotenv import load_dotenv  # load .env variables
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from sqlalchemy.exc import OperationalError
 
 from app.database import Base, engine
 
@@ -71,9 +74,34 @@ app.include_router(scoreboard_router)
 # ----- Startup: ensure tables exist -----
 @app.on_event("startup")
 async def on_startup():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logging.info("CTF backend API started up and database tables ensured.")
+    """Ensure database connectivity with simple retry logic."""
+
+    max_attempts = int(os.getenv("DB_INIT_MAX_ATTEMPTS", "10"))
+    base_delay = float(os.getenv("DB_INIT_RETRY_SECONDS", "1.0"))
+
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+        except OperationalError as exc:  # pragma: no cover - depends on timing
+            if attempt >= max_attempts:
+                logging.exception("Database not reachable after %s attempts", attempt)
+                raise
+
+            wait_time = base_delay * min(2 ** (attempt - 1), 8)
+            logging.warning(
+                "Database not ready (attempt %s/%s): %s. Retrying in %.1f seconds...",
+                attempt,
+                max_attempts,
+                exc,
+                wait_time,
+            )
+            await asyncio.sleep(wait_time)
+        else:
+            logging.info("CTF backend API started and database tables ensured.")
+            break
 
 # ----- Health check endpoint -----
 @app.get("/health", tags=["meta"])
