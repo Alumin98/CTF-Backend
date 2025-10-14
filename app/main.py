@@ -113,8 +113,6 @@ async def on_startup():
         try:
             async with database.engine.begin() as conn:
                 await conn.run_sync(database.Base.metadata.create_all)
-                await _ensure_first_blood_column(conn)
-
 
                 if conn.dialect.name == "sqlite":
                     ddl = text(
