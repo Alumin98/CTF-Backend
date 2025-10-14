@@ -40,7 +40,6 @@ def _normalize_database_url(raw_url: Optional[str]) -> Optional[str]:
 
 DEFAULT_SQLITE_URL: str = _default_db_url()
 DATABASE_URL: str = _normalize_database_url(os.getenv("DATABASE_URL")) or DEFAULT_SQLITE_URL
-
 # Optional echo flag for local debugging
 ECHO = os.getenv("SQLALCHEMY_ECHO", "0").lower() in {"1", "true", "yes"}
 
