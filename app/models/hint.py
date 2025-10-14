@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from sqlalchemy import Column, ForeignKey, Integer, Text
 from sqlalchemy.orm import relationship, reconstructor
+from sqlalchemy import Column, ForeignKey, Integer, Text
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -44,5 +46,6 @@ class Hint(Base):
             self._order_index_runtime = int(value)
         except (TypeError, ValueError):
             self._order_index_runtime = 0
+    order_index = Column(Integer, nullable=False, default=0)
 
     challenge = relationship("Challenge", back_populates="hints")
