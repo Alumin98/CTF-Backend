@@ -1,7 +1,10 @@
 # app/database.py
 from __future__ import annotations
 
+import logging
+import logging
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 def _default_db_url() -> str:
@@ -38,7 +43,27 @@ def _normalize_database_url(raw_url: Optional[str]) -> Optional[str]:
     return raw_url
 
 
-DATABASE_URL: str = _normalize_database_url(os.getenv("DATABASE_URL")) or _default_db_url()
+def _resolve_database_url() -> str:
+    raw_url = os.getenv("DATABASE_URL")
+    normalized = _normalize_database_url(raw_url)
+
+    if normalized:
+        return normalized
+
+    # When pytest drives the import graph it loads its own modules first. Allow
+    # the lightweight SQLite fallback in that context so unit tests run without
+    # a real PostgreSQL service.
+    if "pytest" in sys.modules:
+        return _default_db_url()
+
+    raise RuntimeError(
+        "DATABASE_URL is not configured. Start the docker-compose stack so the "
+        "PostgreSQL service is available, or export DATABASE_URL before "
+        "running the API directly. See README.md for detailed instructions."
+    )
+
+
+DATABASE_URL: str = _resolve_database_url()
 
 # Optional echo flag for local debugging
 ECHO = os.getenv("SQLALCHEMY_ECHO", "0").lower() in {"1", "true", "yes"}

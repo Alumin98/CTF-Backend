@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import OperationalError
 
 from app.database import Base, engine
+from sqlalchemy.engine.url import URL
 
 # ----- Load environment variables -----
 load_dotenv()
@@ -78,6 +79,14 @@ async def on_startup():
 
     max_attempts = int(os.getenv("DB_INIT_MAX_ATTEMPTS", "10"))
     base_delay = float(os.getenv("DB_INIT_RETRY_SECONDS", "1.0"))
+
+    # Log the database host we are waiting for (without leaking credentials) so
+    # operators immediately know which service must be running.
+    target_url: URL = engine.url
+    logging.info(
+        "Waiting for database at %s",
+        target_url.render_as_string(hide_password=True),
+    )
 
     attempt = 0
     while True:
