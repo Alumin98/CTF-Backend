@@ -100,52 +100,6 @@ async def _ensure_first_blood_column(conn):
             raise
 
 
-async def _table_has_column(conn, table_name: str, column_name: str) -> bool:
-    """Return True when the given table already exposes the requested column."""
-
-    dialect = conn.dialect.name
-
-    if dialect == "sqlite":
-        pragma_sql = text(f"PRAGMA table_info({table_name})")
-        result = await conn.execute(pragma_sql)
-        rows = result.fetchall()
-        return any(row._mapping.get("name") == column_name for row in rows)
-
-    result = await conn.execute(
-        text(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = :table_name "
-            "AND column_name = :column_name "
-            "AND table_schema = ANY (current_schemas(false))"
-        ),
-        {"table_name": table_name, "column_name": column_name},
-    )
-    return result.first() is not None
-
-
-async def _ensure_hints_order_index_column(conn):
-    if await _table_has_column(conn, "hints", "order_index"):
-        return
-
-    ddl = text(
-        "ALTER TABLE hints ADD COLUMN order_index INTEGER NOT NULL DEFAULT 0"
-    )
-
-    try:
-        await conn.execute(ddl)
-    except DBAPIError as ddl_error:  # column may already exist (race condition)
-        message = str(getattr(ddl_error, "orig", ddl_error)).lower()
-        if not any(
-            phrase in message
-            for phrase in (
-                "duplicate column name",
-                "already exists",
-                'column "order_index" of relation "hints" already exists',
-            )
-        ):
-            raise
-
-
 @app.on_event("startup")
 async def on_startup():
     """Ensure database connectivity with simple retry logic."""
@@ -159,9 +113,31 @@ async def on_startup():
         try:
             async with database.engine.begin() as conn:
                 await conn.run_sync(database.Base.metadata.create_all)
-                await _ensure_first_blood_column(conn)
-                await _ensure_hints_order_index_column(conn)
 
+                if conn.dialect.name == "sqlite":
+                    ddl = text(
+                        "ALTER TABLE submissions ADD COLUMN first_blood "
+                        "BOOLEAN NOT NULL DEFAULT 0"
+                    )
+                else:
+                    ddl = text(
+                        "ALTER TABLE submissions ADD COLUMN first_blood "
+                        "BOOLEAN NOT NULL DEFAULT FALSE"
+                    )
+
+                try:
+                    await conn.execute(ddl)
+                except DBAPIError as ddl_error:  # column may already exist
+                    message = str(getattr(ddl_error, "orig", ddl_error)).lower()
+                    if not any(
+                        phrase in message
+                        for phrase in (
+                            "duplicate column name",
+                            "already exists",
+                            'column "first_blood" of relation "submissions" already exists',
+                        )
+                    ):
+                        raise
         except (OperationalError, DBAPIError, OSError) as exc:  # pragma: no cover - depends on timing
             if attempt >= max_attempts:
                 allow_sqlite_fallback = os.getenv("DB_ALLOW_SQLITE_FALLBACK", "1").lower() in {
