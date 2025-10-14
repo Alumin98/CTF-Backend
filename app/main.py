@@ -100,46 +100,6 @@ async def _ensure_first_blood_column(conn):
             raise
 
 
-async def _rename_legacy_hint_columns(conn):
-    dialect = conn.dialect.name
-
-    if dialect == "sqlite":
-        result = await conn.execute(text("PRAGMA table_info(hints)"))
-        column_names = {row[1] for row in result}
-    else:
-        result = await conn.execute(
-            text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name = 'hints' AND table_schema = current_schema()"
-            )
-        )
-        column_names = {row[0] for row in result}
-
-    renames = []
-    if "hint_text" in column_names and "text" not in column_names:
-        renames.append(("hint_text", "text"))
-    if "point_penalty" in column_names and "penalty" not in column_names:
-        renames.append(("point_penalty", "penalty"))
-
-    for old, new in renames:
-        stmt = text(f'ALTER TABLE hints RENAME COLUMN "{old}" TO "{new}"')
-        try:
-            await conn.execute(stmt)
-        except DBAPIError as ddl_error:  # pragma: no cover - depends on backend version
-            message = str(getattr(ddl_error, "orig", ddl_error)).lower()
-            if any(
-                phrase in message
-                for phrase in (
-                    "does not exist",
-                    "no such column",
-                    "duplicate column name",
-                    "already exists",
-                )
-            ):
-                continue
-            raise
-
-
 @app.on_event("startup")
 async def on_startup():
     """Ensure database connectivity with simple retry logic."""
@@ -154,7 +114,6 @@ async def on_startup():
             async with database.engine.begin() as conn:
                 await conn.run_sync(database.Base.metadata.create_all)
                 await _ensure_first_blood_column(conn)
-                await _rename_legacy_hint_columns(conn)
 
         except (OperationalError, DBAPIError, OSError) as exc:  # pragma: no cover - depends on timing
             if attempt >= max_attempts:

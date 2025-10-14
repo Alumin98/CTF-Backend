@@ -14,8 +14,8 @@ class Hint(Base):
         nullable=False,
         index=True,
     )
-    text = Column(Text, nullable=False)
-    penalty = Column(Integer, nullable=False, default=0)
+    text = Column("hint_text", Text, nullable=False)
+    penalty = Column("point_penalty", Integer, nullable=False, default=0)
     order_index = Column(Integer, nullable=False, default=0)
 
     challenge = relationship("Challenge", back_populates="hints")
