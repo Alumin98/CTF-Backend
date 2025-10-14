@@ -18,7 +18,11 @@ class Submission(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     challenge_id = Column(Integer, ForeignKey("challenges.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    submitted_hash = Column(String(255), nullable=False)
+    # The underlying database column is named ``submitted_flag``.
+    # Historical deployments populated it with a hashed flag value,
+    # so keep exposing it in the ORM as ``submitted_hash`` while
+    # binding it to the existing column name.
+    submitted_hash = Column("submitted_flag", String(255), nullable=False)
     # Stored as TEXT 'true' / 'false' (your routes cast to Boolean when filtering)
     is_correct = Column(String(10), nullable=False, default="false")
 
