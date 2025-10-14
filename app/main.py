@@ -6,6 +6,7 @@ from dotenv import load_dotenv  # load .env variables
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 from app import database
@@ -85,6 +86,32 @@ async def on_startup():
         try:
             async with database.engine.begin() as conn:
                 await conn.run_sync(database.Base.metadata.create_all)
+
+                if conn.dialect.name == "sqlite":
+                    ddl = text(
+                        "ALTER TABLE submissions ADD COLUMN first_blood "
+                        "BOOLEAN NOT NULL DEFAULT 0"
+                    )
+                else:
+                    ddl = text(
+                        "ALTER TABLE submissions ADD COLUMN first_blood "
+                        "BOOLEAN NOT NULL DEFAULT FALSE"
+                    )
+
+                try:
+                    await conn.execute(ddl)
+                except DBAPIError as ddl_error:  # column may already exist
+                    message = str(getattr(ddl_error, "orig", ddl_error)).lower()
+                    if not any(
+                        phrase in message
+                        for phrase in (
+                            "duplicate column name",
+                            "already exists",
+                            'column "first_blood" of relation "submissions" already exists',
+                        )
+                    ):
+                        raise
+
         except (OperationalError, DBAPIError, OSError) as exc:  # pragma: no cover - depends on timing
             if attempt >= max_attempts:
                 allow_sqlite_fallback = os.getenv("DB_ALLOW_SQLITE_FALLBACK", "1").lower() in {
