@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +40,14 @@ def _warn_if_plaintext_flag(ch: Challenge) -> None:
             "Consider migrating existing records to hashed values.",
             ch.id,
         )
+
+
+def _as_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Return a timezone-naive datetime in UTC for storage."""
+
+    if dt is None or dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 def _is_admin(user: User) -> bool:
     """Return True when the current user should be treated as an admin."""
@@ -101,8 +110,8 @@ async def create_challenge(
         docker_image=payload.docker_image,
         is_active=True if payload.is_active is None else payload.is_active,
         is_private=False if payload.is_private is None else payload.is_private,
-        visible_from=payload.visible_from,
-        visible_to=payload.visible_to,
+        visible_from=_as_naive_utc(payload.visible_from),
+        visible_to=_as_naive_utc(payload.visible_to),
         competition_id=payload.competition_id,
         unlocked_by_id=payload.unlocked_by_id,
         flag=hash_flag(payload.flag) if payload.flag is not None else None,
@@ -111,11 +120,11 @@ async def create_challenge(
     for h in payload.hints or []:
         ch.hints.append(Hint(text=h.text, penalty=h.penalty, order_index=h.order_index))
 
-    db.add(ch)
-    await db.flush()  # get ch.id
-
     # tags
     ch.set_tag_strings(payload.tags or [])
+
+    db.add(ch)
+    await db.flush()  # get ch.id
 
     await db.commit()
     await db.refresh(ch)
@@ -179,6 +188,8 @@ async def update_challenge_admin(
     ]:
         val = getattr(payload, field)
         if val is not None:
+            if field in {"visible_from", "visible_to"}:
+                val = _as_naive_utc(val)
             setattr(ch, field, val)
 
     # flag update (write-only)
@@ -189,6 +200,7 @@ async def update_challenge_admin(
 
     # tags (full replace if provided)
     if payload.tags is not None:
+        await db.refresh(ch, attribute_names=["tags"])
         ch.set_tag_strings(payload.tags)
 
     # hints (full replace if provided)
