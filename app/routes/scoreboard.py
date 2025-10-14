@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import Boolean, cast, desc, asc, func, select
+from sqlalchemy import Boolean, Text, cast, desc, asc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -97,15 +97,16 @@ async def get_scoreboard(
 
     results = []
     if type == "user":
+        name_expr = func.coalesce(User.username, User.email, cast(User.id, Text))
         stmt = (
             select(
                 User.id.label("subject_id"),
-                func.coalesce(User.username, User.email, func.cast(User.id, func.TEXT())).label("name"),
+                name_expr.label("name"),
                 func.coalesce(func.sum(first_correct.c.points), 0).label("score"),
                 func.min(first_correct.c.first_solve_at).label("first_solve_at"),
             )
             .join(first_correct, first_correct.c.user_id == User.id)
-            .group_by(User.id, func.coalesce(User.username, User.email, func.cast(User.id, func.TEXT())))
+            .group_by(User.id, name_expr)
             .order_by(desc("score"), asc("first_solve_at"))
             .limit(limit)
         )
