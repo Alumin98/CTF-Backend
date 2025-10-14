@@ -111,11 +111,11 @@ async def create_challenge(
     for h in payload.hints or []:
         ch.hints.append(Hint(text=h.text, penalty=h.penalty, order_index=h.order_index))
 
-    db.add(ch)
-    await db.flush()  # get ch.id
-
     # tags
     ch.set_tag_strings(payload.tags or [])
+
+    db.add(ch)
+    await db.flush()  # get ch.id
 
     await db.commit()
     await db.refresh(ch)
@@ -189,6 +189,7 @@ async def update_challenge_admin(
 
     # tags (full replace if provided)
     if payload.tags is not None:
+        await db.refresh(ch, attribute_names=["tags"])
         ch.set_tag_strings(payload.tags)
 
     # hints (full replace if provided)
