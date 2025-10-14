@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,7 +42,7 @@ def _warn_if_plaintext_flag(ch: Challenge) -> None:
         )
 
 
-def _as_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
+def _as_naive_utc(dt):
     """Return a timezone-naive datetime in UTC for storage."""
 
     if dt is None or dt.tzinfo is None:
