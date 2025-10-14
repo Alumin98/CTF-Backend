@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import logging
-import logging
 import os
 import sys
 from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -95,3 +95,22 @@ async def get_db():
     """
     async with SessionLocal() as session:
         yield session
+
+
+def ensure_submission_schema(connection) -> None:
+    """Ensure legacy databases include the columns expected by the ORM."""
+
+    inspector = inspect(connection)
+    columns = {column["name"] for column in inspector.get_columns("submissions")}
+
+    if "submitted_hash" not in columns:
+        logger.info("Adding missing submissions.submitted_hash column")
+        connection.execute(
+            text("ALTER TABLE submissions ADD COLUMN submitted_hash VARCHAR(255)")
+        )
+        connection.execute(
+            text("UPDATE submissions SET submitted_hash = '' WHERE submitted_hash IS NULL")
+        )
+        connection.execute(
+            text("ALTER TABLE submissions ALTER COLUMN submitted_hash SET NOT NULL")
+        )

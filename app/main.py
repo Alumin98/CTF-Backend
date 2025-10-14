@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from sqlalchemy.exc import OperationalError
 
-from app.database import Base, engine
+from app.database import Base, engine, ensure_submission_schema
 from sqlalchemy.engine.url import URL
 
 # ----- Load environment variables -----
@@ -94,6 +94,7 @@ async def on_startup():
         try:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                await conn.run_sync(ensure_submission_schema)
         except OperationalError as exc:  # pragma: no cover - depends on timing
             if attempt >= max_attempts:
                 logging.exception("Database not reachable after %s attempts", attempt)
