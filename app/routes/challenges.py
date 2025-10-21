@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone
 
 from app.database import get_db
@@ -29,38 +30,54 @@ async def create_challenge(
 ):
     """
     Create a challenge.
-    - Hash the flag before storing.
+    - Hash the flag before storing (flag_hash).
     - Map API 'start_time'/'end_time' -> model 'visible_from'/'visible_to'.
     """
-    try:
-        data = challenge.dict()
-        data["flag"] = hash_flag(challenge.flag)
-        data["visible_from"] = data.pop("start_time", None)
-        data["visible_to"] = data.pop("end_time", None)
+    # Build payload compatible with the Challenge model
+    data = challenge.dict()
 
-        new_ch = Challenge(**data)
+    # ✅ store hashed flag in the correct DB column
+    data["flag_hash"] = hash_flag(challenge.flag)
+    data.pop("flag", None)  # never pass raw flag to the model
+
+    # ✅ map API names to model field names
+    data["visible_from"] = data.pop("start_time", None)
+    data["visible_to"] = data.pop("end_time", None)
+
+    new_ch = Challenge(**data)
+
+    try:
         db.add(new_ch)
+        # Flush first so constraint/FK errors surface here (clean 4xx instead of 500)
+        await db.flush()
         await db.commit()
         await db.refresh(new_ch)
-
-        # Manually map model -> API schema fields (include required fields!)
-        return ChallengePublic(
-            id=new_ch.id,
-            title=new_ch.title,
-            description=new_ch.description,
-            category_id=getattr(new_ch, "category_id", None),
-            points=new_ch.points,
-            difficulty=new_ch.difficulty,
-            is_active=new_ch.is_active,
-            start_time=new_ch.visible_from,
-            end_time=new_ch.visible_to,
-            created_at=getattr(new_ch, "created_at", None),
-            solves=0,
-        )
+    except IntegrityError as e:
+        await db.rollback()
+        # If you named your unique constraint, you can match it precisely here
+        # Example: if you have UNIQUE(event_id, slug) named 'uq_challenge_event_slug'
+        if "uq_challenge_event_slug" in str(e.orig):
+            raise HTTPException(status_code=409, detail="Slug already used for this event")
+        raise HTTPException(status_code=400, detail="Integrity error while creating challenge")
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        await db.rollback()
+        # Fall back to generic 500 with message
         raise HTTPException(status_code=500, detail=str(e))
+
+    # Return public schema using API field names
+    return ChallengePublic(
+        id=new_ch.id,
+        title=new_ch.title,
+        description=new_ch.description,
+        category_id=getattr(new_ch, "category_id", None),
+        points=new_ch.points,
+        difficulty=new_ch.difficulty,
+        is_active=new_ch.is_active,
+        start_time=getattr(new_ch, "visible_from", None),
+        end_time=getattr(new_ch, "visible_to", None),
+        created_at=getattr(new_ch, "created_at", None),
+        solves=0,
+    )
 
 
 @router.get("/challenges/", response_model=list[ChallengePublic])
@@ -127,7 +144,8 @@ async def update_challenge(
 
     # Map API -> model where needed
     if "flag" in challenge_update:
-        challenge_update["flag"] = hash_flag(challenge_update["flag"])
+        # ✅ write to flag_hash, do not keep raw flag
+        challenge_update["flag_hash"] = hash_flag(challenge_update.pop("flag"))
     if "start_time" in challenge_update:
         challenge_update["visible_from"] = challenge_update.pop("start_time")
     if "end_time" in challenge_update:
@@ -136,8 +154,15 @@ async def update_challenge(
     for k, v in challenge_update.items():
         setattr(ch, k, v)
 
-    await db.commit()
-    await db.refresh(ch)
+    try:
+        await db.flush()
+        await db.commit()
+        await db.refresh(ch)
+    except IntegrityError as e:
+        await db.rollback()
+        if "uq_challenge_event_slug" in str(e.orig):
+            raise HTTPException(status_code=409, detail="Slug already used for this event")
+        raise HTTPException(status_code=400, detail="Integrity error while updating challenge")
 
     return ChallengePublic(
         id=ch.id,
