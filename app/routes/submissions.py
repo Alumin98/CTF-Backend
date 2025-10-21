@@ -1,13 +1,12 @@
 # app/routes/submissions.py
-# Tailored to: submissions.is_correct TEXT ('true'/'false'), NO submissions.score column
 
 from datetime import datetime
 from typing import Optional, Literal
+import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, desc, asc, cast, Boolean
+from sqlalchemy import select, func, desc, asc, cast, Boolean, insert
 
 from app.database import get_db
 from app.auth_token import get_current_user
@@ -15,16 +14,42 @@ from app.routes.auth import hash_flag
 
 from app.models.submission import Submission
 from app.models.challenge import Challenge
+from app.models.hint import Hint
 from app.models.user import User
 from app.models.team import Team
 from app.models.event_challenge import EventChallenge
+from app.models.achievement import Achievement, AchievementType  # <-- NEW
 
 from app.schemas import FlagSubmission, SubmissionResult
 
 router = APIRouter()
 
+
 # -------------------------------------------------------------------
-# POST /submit  – record a submission (TEXT is_correct)
+# Scoring helpers (inlined here)
+# -------------------------------------------------------------------
+def dynamic_points(base: int, min_points: int, decay: int, current_solves: int) -> int:
+    """
+    Linear decay scoring:
+    - Start from base points
+    - Subtract decay * number of solves
+    - Clamp to min_points
+    """
+    pts = base - (current_solves * decay)
+    return max(min_points, pts)
+
+
+def apply_hint_penalty(points: int, penalties: list[int]) -> int:
+    """
+    Deduct hint penalties from score.
+    Never go below zero.
+    """
+    total_penalty = sum(penalties)
+    return max(0, points - total_penalty)
+
+
+# -------------------------------------------------------------------
+# POST /submit – record a submission (+ achievements)
 # -------------------------------------------------------------------
 @router.post("/submit/", response_model=SubmissionResult)
 async def submit_flag(
@@ -46,17 +71,21 @@ async def submit_flag(
             select(Submission.id).where(
                 Submission.user_id == user.id,
                 Submission.challenge_id == submission.challenge_id,
-                cast(Submission.is_correct, Boolean) == True,  # CAST TEXT -> BOOL
+                cast(Submission.is_correct, Boolean) == True,
             )
         )
         if solved_res.scalar_one_or_none():
-            return {"correct": False, "message": "You already solved this challenge."}
+            return {
+                "correct": False,
+                "message": "You already solved this challenge.",
+                "score": 0,
+            }
 
         # 3) Check flag
         submitted_hash = hash_flag(submission.submitted_flag)
         is_correct_bool = (submitted_hash == challenge.flag)
 
-        # 4) First blood?
+        # 4) First blood? (before inserting ours)
         fb_res = await db.execute(
             select(Submission.id).where(
                 Submission.challenge_id == challenge.id,
@@ -66,7 +95,35 @@ async def submit_flag(
         )
         is_first_blood = False if fb_res.scalar_one_or_none() else True
 
-        # 5) Save submission (store TEXT 'true'/'false' to match DB)
+        # 5) Calculate score ahead of time so we can persist it
+        score_awarded = 0
+        if is_correct_bool:
+            # count current correct solves (BEFORE this one)
+            n_res = await db.execute(
+                select(func.count(Submission.id)).where(
+                    Submission.challenge_id == challenge.id,
+                    cast(Submission.is_correct, Boolean) == True,
+                )
+            )
+            n_solves = n_res.scalar_one() or 0
+
+            # base dynamic points
+            base = challenge.points or 100  # fallback if challenge.points is NULL
+            min_points = 10
+            decay = 10
+            points = dynamic_points(base, min_points, decay, n_solves)
+
+            # apply hint penalties
+            penalties = []
+            if submission.used_hint_ids:
+                hint_rows = (
+                    await db.execute(select(Hint).where(Hint.id.in_(submission.used_hint_ids)))
+                ).scalars().all()
+                penalties = [h.penalty for h in hint_rows]
+
+            score_awarded = apply_hint_penalty(points, penalties)
+
+        # 6) Save submission (TEXT 'true'/'false' in DB)
         new_sub = Submission(
             user_id=user.id,
             challenge_id=challenge.id,
@@ -74,27 +131,50 @@ async def submit_flag(
             is_correct="true" if is_correct_bool else "false",
             submitted_at=datetime.utcnow(),
             first_blood=is_first_blood,
-            # NOTE: do not set Submission.score — your DB doesn't have that column
+            points_awarded=score_awarded if is_correct_bool else 0,
+            used_hint_ids=",".join(map(str, submission.used_hint_ids)) if submission.used_hint_ids else None,
         )
         db.add(new_sub)
         await db.commit()
 
-        # Optional: dynamic score for UI only (not stored in DB)
-        score_awarded = 0
+        # 7) Achievements (best-effort; ignore unique errors)
         if is_correct_bool:
-            # simple decreasing scheme, independent of DB schema
-            n_res = await db.execute(
-                select(func.count(func.distinct(User.team_id)))
-                .select_from(Submission)
-                .join(User, User.id == Submission.user_id)
-                .where(
-                    Submission.challenge_id == challenge.id,
-                    cast(Submission.is_correct, Boolean) == True,
-                    User.team_id.isnot(None),
-                )
-            )
-            n_solves = n_res.scalar_one() or 0
-            score_awarded = max(100 - (10 * n_solves), 10)
+            # FIRST BLOOD
+            if is_first_blood:
+                try:
+                    await db.execute(
+                        insert(Achievement).values(
+                            user_id=user.id,
+                            type=AchievementType.FIRST_BLOOD,
+                            challenge_id=challenge.id,
+                            category_id=None,
+                            details="First correct solver",
+                            points_at_award=score_awarded,
+                        )
+                    )
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+
+            # FAST SOLVER (within N minutes of visible_from)
+            fast_minutes = int(os.getenv("FAST_SOLVER_MINUTES", "10"))
+            if challenge.visible_from:
+                delta = new_sub.submitted_at - challenge.visible_from
+                if delta.total_seconds() <= fast_minutes * 60:
+                    try:
+                        await db.execute(
+                            insert(Achievement).values(
+                                user_id=user.id,
+                                type=AchievementType.FAST_SOLVER,
+                                challenge_id=challenge.id,
+                                category_id=challenge.category_id,
+                                details=f"Solved within {fast_minutes} minutes",
+                                points_at_award=score_awarded,
+                            )
+                        )
+                        await db.commit()
+                    except Exception:
+                        await db.rollback()
 
         return {
             "correct": is_correct_bool,
@@ -109,9 +189,7 @@ async def submit_flag(
 
 
 # -------------------------------------------------------------------
-# GET /leaderboard  – sum Challenge.points for FIRST correct solves
-#                     tie-break = earliest first_solve_at
-#                     optional ?event_id= via event_challenges
+# GET /leaderboard – aggregate *awarded* scores (dynamic + penalties)
 # -------------------------------------------------------------------
 @router.get("/leaderboard/")
 async def get_leaderboard(
@@ -122,90 +200,94 @@ async def get_leaderboard(
 ):
     IS_CORRECT_TRUE = cast(Submission.is_correct, Boolean) == True
 
-    # Earliest correct submission per (user, challenge)
-    first_correct = (
-        select(
-            Submission.user_id.label("user_id"),
-            Submission.challenge_id.label("challenge_id"),
-            func.min(Submission.submitted_at).label("first_solve_at"),
-        )
-        .where(IS_CORRECT_TRUE)
-        .group_by(Submission.user_id, Submission.challenge_id)
-        .cte("first_correct")
-    )
-
-    # Join to Challenge.points; optionally scope by event
+    # Use stored points_awarded, grouped by user (your /submit prevents duplicates per challenge)
     base_q = (
         select(
-            first_correct.c.user_id,
-            first_correct.c.challenge_id,
-            first_correct.c.first_solve_at,
-            Challenge.points.label("points"),
+            Submission.user_id,
+            func.min(Submission.submitted_at).label("first_solve_at"),
+            func.sum(Submission.points_awarded).label("points"),
         )
-        .join(Challenge, Challenge.id == first_correct.c.challenge_id)
+        .where(IS_CORRECT_TRUE)
+        .group_by(Submission.user_id)
     )
 
+    # Scope by event if needed
     if event_id is not None:
         base_q = (
-            base_q.join(
-                EventChallenge,
-                EventChallenge.challenge_id == first_correct.c.challenge_id,
-            )
+            base_q.join(EventChallenge, EventChallenge.challenge_id == Submission.challenge_id)
             .where(EventChallenge.event_id == event_id)
         )
 
-    fc_with_points = base_q.cte("fc_with_points")
+    rows = (await db.execute(base_q)).all()
 
+    user_ids = {r.user_id for r in rows}
+    users = (
+        await db.execute(select(User).where(User.id.in_(user_ids)))
+        if user_ids
+        else None
+    )
+    user_map = {u.id: u for u in (users.scalars().all() if users else [])}
+
+    results = []
     if type == "user":
-        stmt = (
-            select(
-                User.id.label("subject_id"),
-                func.coalesce(User.username, User.email, User.id).label("name"),
-                func.coalesce(func.sum(fc_with_points.c.points), 0).label("score"),
-                func.min(fc_with_points.c.first_solve_at).label("first_solve_at"),
+        for r in rows:
+            u = user_map.get(r.user_id)
+            results.append(
+                {
+                    "subject_type": "user",
+                    "subject_id": r.user_id,
+                    "name": u.username if u else f"User {r.user_id}",
+                    "score": int(r.points or 0),
+                    "first_solve_at": r.first_solve_at,
+                }
             )
-            .select_from(User)
-            .join(fc_with_points, fc_with_points.c.user_id == User.id)
-            .group_by(User.id, func.coalesce(User.username, User.email, User.id))
-            .order_by(desc("score"), asc("first_solve_at"))
-            .limit(limit)
-        )
-    else:
-        stmt = (
-            select(
-                Team.id.label("subject_id"),
-                Team.team_name.label("name"),  # your table uses team_name
-                func.coalesce(func.sum(fc_with_points.c.points), 0).label("score"),
-                func.min(fc_with_points.c.first_solve_at).label("first_solve_at"),
+    else:  # team
+        team_totals: dict[int, dict] = {}
+        for r in rows:
+            u = user_map.get(r.user_id)
+            if not u or not u.team_id:
+                continue
+
+            team_entry = team_totals.setdefault(
+                u.team_id,
+                {
+                    "subject_type": "team",
+                    "subject_id": u.team_id,
+                    "name": None,
+                    "score": 0,
+                    "first_solve_at": None,
+                },
             )
-            .select_from(Team)
-            .join(User, User.team_id == Team.id)
-            .join(fc_with_points, fc_with_points.c.user_id == User.id)
-            .group_by(Team.id, Team.team_name)
-            .order_by(desc("score"), asc("first_solve_at"))
-            .limit(limit)
+
+            team_entry["score"] += int(r.points or 0)
+            if r.first_solve_at:
+                if not team_entry["first_solve_at"] or r.first_solve_at < team_entry["first_solve_at"]:
+                    team_entry["first_solve_at"] = r.first_solve_at
+
+        team_ids = list(team_totals.keys())
+        teams = (
+            await db.execute(select(Team).where(Team.id.in_(team_ids)))
+            if team_ids
+            else None
         )
+        team_map = {t.id: t for t in (teams.scalars().all() if teams else [])}
 
-    rows = (await db.execute(stmt)).all()
+        for team_id, entry in team_totals.items():
+            team = team_map.get(team_id)
+            entry["name"] = team.team_name if team else f"Team {team_id}"
+            results.append(entry)
 
-    # Rank with ties (score, first_solve_at)
-    results, rank, prev_key = [], 0, None
-    for r in rows:
-        score = int(r.score or 0)
-        ts = r.first_solve_at
-        key = (score, ts)
+    # Rank results (score desc, tiebreak earliest solve)
+    results.sort(key=lambda x: (-x["score"], x["first_solve_at"] or datetime.max))
+    ranked, prev_key, rank = [], None, 0
+    for r in results:
+        key = (r["score"], r["first_solve_at"])
         if key != prev_key:
-            rank = len(results) + 1
+            rank = len(ranked) + 1
             prev_key = key
-        results.append(
-            {
-                "rank": rank,
-                "subject_type": type,
-                "subject_id": r.subject_id,
-                "name": r.name,
-                "score": score,
-                "first_solve_at": ts.isoformat() if ts else None,
-            }
-        )
+        first_solve = r["first_solve_at"]
+        if isinstance(first_solve, datetime):
+            first_solve = first_solve.isoformat()
+        ranked.append({**r, "first_solve_at": first_solve, "rank": rank})
 
-    return {"type": type, "event_id": event_id, "results": results}
+    return {"type": type, "event_id": event_id, "results": ranked[:limit]}

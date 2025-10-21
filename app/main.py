@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from dotenv import load_dotenv  # load .env variables
@@ -5,7 +6,10 @@ from dotenv import load_dotenv  # load .env variables
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import Base, engine
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, OperationalError
+
+from app import database
 
 # ----- Load environment variables -----
 load_dotenv()
@@ -20,16 +24,18 @@ logging.basicConfig(
 from app.models import (  # noqa: F401 (imported for side effects)
     user, role, team, team_member, category, challenge,
     challenge_tag, event, hint, event_challenge,
-    submission, activity_log, admin_action, competition
+    submission, activity_log, admin_action, competition, achievement
 )
 
 # ----- Routers -----
 from app.routes.auth import router as auth_router
 from app.routes.teams import router as team_router
-from app.routes.challenges import router as challenge_router
+from app.routes.challenges import router as challenge_router         # public challenges
+from app.routes.admin_challenges import admin as admin_chal_router   # NEW: admin challenges
 from app.routes.submissions import router as submission_router
 from app.routes import competition as competition_routes
 from app.routes.password_reset import router as password_reset_router
+from app.routes.scoreboard import router as scoreboard_router
 
 # ----- FastAPI app -----
 app = FastAPI(
@@ -59,24 +65,132 @@ if raw_origins:
 # ----- Include routers -----
 app.include_router(auth_router, prefix="/auth")
 app.include_router(team_router)
-app.include_router(challenge_router)
+app.include_router(challenge_router)       # /challenges ...
+app.include_router(admin_chal_router)      
 app.include_router(submission_router)
 app.include_router(competition_routes.router)
 app.include_router(password_reset_router)
+app.include_router(scoreboard_router)
 
 # ----- Startup: ensure tables exist -----
+async def _ensure_first_blood_column(conn):
+    if conn.dialect.name == "sqlite":
+        ddl = text(
+            "ALTER TABLE submissions ADD COLUMN first_blood "
+            "BOOLEAN NOT NULL DEFAULT 0"
+        )
+    else:
+        ddl = text(
+            "ALTER TABLE submissions ADD COLUMN first_blood "
+            "BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+
+    try:
+        await conn.execute(ddl)
+    except DBAPIError as ddl_error:  # column may already exist
+        message = str(getattr(ddl_error, "orig", ddl_error)).lower()
+        if not any(
+            phrase in message
+            for phrase in (
+                "duplicate column name",
+                "already exists",
+                'column "first_blood" of relation "submissions" already exists',
+            )
+        ):
+            raise
+
+
 @app.on_event("startup")
 async def on_startup():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logging.info("CTF backend API started up and database tables ensured.")
+    """Ensure database connectivity with simple retry logic."""
+
+    max_attempts = int(os.getenv("DB_INIT_MAX_ATTEMPTS", "10"))
+    base_delay = float(os.getenv("DB_INIT_RETRY_SECONDS", "1.0"))
+
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            async with database.engine.begin() as conn:
+                await conn.run_sync(database.Base.metadata.create_all)
+
+                if conn.dialect.name == "sqlite":
+                    ddl = text(
+                        "ALTER TABLE submissions ADD COLUMN first_blood "
+                        "BOOLEAN NOT NULL DEFAULT 0"
+                    )
+                else:
+                    ddl = text(
+                        "ALTER TABLE submissions ADD COLUMN first_blood "
+                        "BOOLEAN NOT NULL DEFAULT FALSE"
+                    )
+
+                try:
+                    await conn.execute(ddl)
+                except DBAPIError as ddl_error:  # column may already exist
+                    message = str(getattr(ddl_error, "orig", ddl_error)).lower()
+                    if not any(
+                        phrase in message
+                        for phrase in (
+                            "duplicate column name",
+                            "already exists",
+                            'column "first_blood" of relation "submissions" already exists',
+                        )
+                    ):
+                        raise
+        except (OperationalError, DBAPIError, OSError) as exc:  # pragma: no cover - depends on timing
+            if attempt >= max_attempts:
+                allow_sqlite_fallback = os.getenv("DB_ALLOW_SQLITE_FALLBACK", "1").lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                }
+
+                using_sqlite_already = (
+                    database.CURRENT_DATABASE_URL == database.DEFAULT_SQLITE_URL
+                )
+
+                if allow_sqlite_fallback and not using_sqlite_already:
+                    logging.error(
+                        "Database not reachable at %s after %s attempts: %s."
+                        " Falling back to local SQLite for development.",
+                        database.CURRENT_DATABASE_URL,
+                        attempt,
+                        exc,
+                    )
+                    await database.engine.dispose()
+                    database.configure_engine(database.DEFAULT_SQLITE_URL)
+                    attempt = 0
+                    continue
+
+                logging.exception("Database not reachable after %s attempts", attempt)
+                raise
+
+            wait_time = base_delay * min(2 ** (attempt - 1), 8)
+            logging.warning(
+                "Database not ready (attempt %s/%s): %s. Retrying in %.1f seconds...",
+                attempt,
+                max_attempts,
+                exc,
+                wait_time,
+            )
+            await asyncio.sleep(wait_time)
+        else:
+            logging.info(
+                "CTF backend API started and database tables ensured (using %s).",
+                database.CURRENT_DATABASE_URL,
+            )
+            break
 
 # ----- Health check endpoint -----
 @app.get("/health", tags=["meta"])
 async def health():
     return {"ok": True}
 
-# ----- Example usage of env vars -----
-db_url = os.getenv("DATABASE_URL")
-jwt_secret = os.getenv("JWT_SECRET")
-logging.info(f"Loaded DATABASE_URL: {db_url}")
+# (Recommended) Avoid logging secrets like DATABASE_URL / JWT_SECRET
+# If you need to confirm they’re loaded, log booleans instead:
+if os.getenv("DATABASE_URL"):
+    logging.info("DATABASE_URL loaded.")
+if os.getenv("JWT_SECRET"):
+    logging.info("JWT_SECRET loaded.")

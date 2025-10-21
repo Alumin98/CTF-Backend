@@ -1,18 +1,18 @@
-version: '3.8'
-
 services:
   backend:
     build:
       context: .
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+      dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    env_file:
+      - .env.docker
     volumes:
       - .:/app
     ports:
       - "8000:8000"
-    environment:
-      - DATABASE_URL=postgresql://ctf_user:ctf_pass@db:5432/ctf_db
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     networks:
       - ctf_net
 
@@ -23,6 +23,11 @@ services:
       - POSTGRES_USER=ctf_user
       - POSTGRES_PASSWORD=ctf_pass
       - POSTGRES_DB=ctf_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ctf_user -d ctf_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     volumes:
       - db_data:/var/lib/postgresql/data
     networks:
@@ -39,6 +44,7 @@ services:
     networks:
       - ctf_net
 
+<<<<<<< HEAD
   # Example challenge container
  # challenge1:
     #build:
@@ -47,6 +53,17 @@ services:
     #  - "9001:9000"
    # networks:
      # - ctf_net 
+=======
+  # Example challenge container (disabled unless the "challenges" profile is enabled)
+  challenge1:
+    build:
+      context: ./challenges/challenge1
+    ports:
+      - "9001:9000"
+    networks:
+      - ctf_net
+    profiles: ["challenges"]
+>>>>>>> dc38fea0bef3efc392b1dd0bb40ff2baaacbdc85
 
   # Add additional challenge containers as needed
   # challenge2:

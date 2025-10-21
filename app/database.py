@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -21,35 +22,75 @@ def _default_db_url() -> str:
 
 
 # Robust DATABASE_URL handling
-DATABASE_URL: str = os.getenv("DATABASE_URL") or _default_db_url()
+
+
+def _normalize_database_url(raw_url: Optional[str]) -> Optional[str]:
+    """Ensure async-friendly drivers even if the URL omits them."""
+
+    if not raw_url:
+        return raw_url
+
+    lowered = raw_url.lower()
+    for prefix in ("postgresql+psycopg2://", "postgresql://", "postgres://"):
+        if lowered.startswith(prefix):
+            return "postgresql+asyncpg://" + raw_url.split("://", 1)[1]
+
+    return raw_url
+
+
+DEFAULT_SQLITE_URL: str = _default_db_url()
+DATABASE_URL: str = _normalize_database_url(os.getenv("DATABASE_URL")) or DEFAULT_SQLITE_URL
 
 # Optional echo flag for local debugging
 ECHO = os.getenv("SQLALCHEMY_ECHO", "0").lower() in {"1", "true", "yes"}
 
-# Create async engine
-engine: AsyncEngine = create_async_engine(
-    DATABASE_URL,
-    echo=ECHO,
-    pool_pre_ping=True,
-)
 
-# IMPORTANT: expire_on_commit=False prevents lazy refresh after commit,
-# which avoids MissingGreenlet when a route reads ORM attributes
-# (e.g., team.team_name) after a commit within the same request.
-SessionLocal = sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    autocommit=False,
-    autoflush=False,
-    expire_on_commit=False,
-)
+def _build_engine(database_url: str) -> AsyncEngine:
+    return create_async_engine(
+        database_url,
+        echo=ECHO,
+        pool_pre_ping=True,
+    )
+
+
+def _build_session_factory(bind_engine: AsyncEngine) -> sessionmaker:
+    return sessionmaker(
+        bind=bind_engine,
+        class_=AsyncSession,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
 
 Base = declarative_base()
 
+# Public globals that can be reconfigured at runtime.
+engine: AsyncEngine
+SessionLocal: sessionmaker
+CURRENT_DATABASE_URL: str
+
+
+def configure_engine(database_url: str) -> None:
+    """Configure the global engine/session factory pair.
+
+    This indirection allows the application to swap databases at runtime
+    (e.g. falling back to SQLite when a Postgres instance is unavailable).
+    """
+
+    global engine, SessionLocal, CURRENT_DATABASE_URL
+
+    engine = _build_engine(database_url)
+    SessionLocal = _build_session_factory(engine)
+    CURRENT_DATABASE_URL = database_url
+
+
+# Initialise globals using the preferred database URL.
+configure_engine(DATABASE_URL)
+
 
 async def get_db():
-    """
-    FastAPI dependency that yields an AsyncSession.
-    """
+    """FastAPI dependency that yields an AsyncSession."""
+
     async with SessionLocal() as session:
         yield session

@@ -1,14 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 from datetime import datetime, timezone
+import logging
+import traceback
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth_token import get_current_user
+from app.database import get_db
+from app.models.submission import Submission
 from app.models.team import Team
 from app.models.user import User
-from app.models.submission import Submission
-from app.database import get_db
 from app.schemas import TeamCreate, TeamReadPublic, TeamReadAdmin, UserProfile
-from app.auth_token import get_current_user
-import traceback, logging
 
 logger = logging.getLogger("teams")
 
@@ -161,7 +164,7 @@ async def delete_team(
     team.team_name = f"deleted-team-{team.id}"
     team.is_deleted = True
     team.deleted_at = datetime.now(timezone.utc)
-    team.deleted_by_user_id = current_user.id
+    team.deleted_by_user_id = user.id
     db.add(team)
 
     result = await db.execute(select(User).where(User.team_id == team_id))
@@ -245,7 +248,7 @@ async def transfer_leadership(
         )
 
     # Only current leader or admin may transfer
-    if getattr(current_user, "is_admin", False) is not True and team.leader_id != current_user.id:
+    if not is_admin(current_user) and team.leader_id != current_user.id:
         raise HTTPException(status_code=403, detail="Only the team leader or an admin can transfer leadership.")
 
     new_leader = await db.get(User, new_leader_user_id)
