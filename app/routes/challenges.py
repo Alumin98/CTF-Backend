@@ -1,32 +1,26 @@
-<<<<<<< HEAD
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-=======
->>>>>>> dc38fea0bef3efc392b1dd0bb40ff2baaacbdc85
 from datetime import datetime, timezone
-from typing import List, Optional
-import os
-
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, cast, Boolean  # <-- added cast, Boolean
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.auth_token import get_current_user  # require auth to view challenges
+from app.auth_token import require_admin
+from app.routes.auth import hash_flag
+
 from app.models.challenge import Challenge
-from app.models.challenge_tag import ChallengeTag
-from app.models.hint import Hint
 from app.models.submission import Submission
 from app.models.user import User
 from app.models.team import Team
-from app.schemas import ChallengePublic
 
-router = APIRouter(prefix="/challenges", tags=["Challenges"])
+from app.schemas import ChallengeCreate, ChallengePublic
+
+router = APIRouter()
+
+# If you have a real dependency, wire it in; otherwise keep it permissive.
+def get_current_user():
+    return None
 
 
-<<<<<<< HEAD
 @router.post("/challenges/", response_model=ChallengePublic)
 async def create_challenge(
     challenge: ChallengeCreate,
@@ -35,166 +29,90 @@ async def create_challenge(
 ):
     """
     Create a challenge.
-    - Hash the flag before storing (flag_hash).
+    - Hash the flag before storing.
     - Map API 'start_time'/'end_time' -> model 'visible_from'/'visible_to'.
     """
-    # Build payload compatible with the Challenge model
-    data = challenge.dict()
-
-    # ✅ store hashed flag in the correct DB column
-    data["flag_hash"] = hash_flag(challenge.flag)
-    data.pop("flag", None)  # never pass raw flag to the model
-
-    # ✅ map API names to model field names
-    data["visible_from"] = data.pop("start_time", None)
-    data["visible_to"] = data.pop("end_time", None)
-
-    new_ch = Challenge(**data)
-
     try:
+        data = challenge.dict()
+        data["flag"] = hash_flag(challenge.flag)
+        data["visible_from"] = data.pop("start_time", None)
+        data["visible_to"] = data.pop("end_time", None)
+
+        new_ch = Challenge(**data)
         db.add(new_ch)
-        # Flush first so constraint/FK errors surface here (clean 4xx instead of 500)
-        await db.flush()
         await db.commit()
         await db.refresh(new_ch)
-    except IntegrityError as e:
-        await db.rollback()
-        # If you named your unique constraint, you can match it precisely here
-        # Example: if you have UNIQUE(event_id, slug) named 'uq_challenge_event_slug'
-        if "uq_challenge_event_slug" in str(e.orig):
-            raise HTTPException(status_code=409, detail="Slug already used for this event")
-        raise HTTPException(status_code=400, detail="Integrity error while creating challenge")
+
+        # Manually map model -> API schema fields (include required fields!)
+        return ChallengePublic(
+            id=new_ch.id,
+            title=new_ch.title,
+            description=new_ch.description,
+            category_id=getattr(new_ch, "category_id", None),
+            points=new_ch.points,
+            difficulty=new_ch.difficulty,
+            is_active=new_ch.is_active,
+            start_time=new_ch.visible_from,
+            end_time=new_ch.visible_to,
+            created_at=getattr(new_ch, "created_at", None),
+            solves=0,
+        )
     except Exception as e:
-        await db.rollback()
-        # Fall back to generic 500 with message
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-=======
-# -----------------------------
-# Helpers
-# -----------------------------
-async def _solves_count(db: AsyncSession, challenge_id: int) -> int:
-    # Your DB stores is_correct as TEXT ('true'/'false'); cast to Boolean for correctness.
-    q = select(func.count(Submission.id)).where(
-        Submission.challenge_id == challenge_id,
-        cast(Submission.is_correct, Boolean) == True,  # noqa: E712
-    )
-    return (await db.execute(q)).scalar_one() or 0
 
 
-def _to_public_schema(ch: Challenge, solves: int) -> ChallengePublic:
-    # Ensure hints are ordered for UI
-    hints_sorted: List[Hint] = sorted(ch.hints or [], key=lambda h: h.order_index)
-    return ChallengePublic(
-        id=ch.id,
-        title=ch.title,
-        description=ch.description or "",
-        category_id=ch.category_id,
-        points=ch.points or 0,
-        difficulty=ch.difficulty,
-        created_at=ch.created_at,
-        competition_id=ch.competition_id,
-        unlocked_by_id=ch.unlocked_by_id,
-        is_active=bool(ch.is_active),
-        is_private=bool(ch.is_private),
-        visible_from=ch.visible_from,
-        visible_to=ch.visible_to,
-        tags=ch.tag_strings,
-        hints=hints_sorted,
-        solves_count=solves,
-    )
-
-
-def _to_aware(dt):
-    if dt is None:
-        return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-
-def _parse_iso8601(s: Optional[str]) -> Optional[datetime]:
-    if not s:
-        return None
-    try:
-        if s.endswith("Z"):
-            s = s[:-1] + "+00:00"
-        return datetime.fromisoformat(s)
-    except Exception:
-        return None
->>>>>>> dc38fea0bef3efc392b1dd0bb40ff2baaacbdc85
-
-    # Return public schema using API field names
-    return ChallengePublic(
-        id=new_ch.id,
-        title=new_ch.title,
-        description=new_ch.description,
-        category_id=getattr(new_ch, "category_id", None),
-        points=new_ch.points,
-        difficulty=new_ch.difficulty,
-        is_active=new_ch.is_active,
-        start_time=getattr(new_ch, "visible_from", None),
-        end_time=getattr(new_ch, "visible_to", None),
-        created_at=getattr(new_ch, "created_at", None),
-        solves=0,
-    )
-
-
-# -----------------------------
-# Public endpoints
-# -----------------------------
-@router.get("", response_model=List[ChallengePublic])
+@router.get("/challenges/", response_model=list[ChallengePublic])
 async def list_challenges(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-    category_id: Optional[int] = Query(None),
-    difficulty: Optional[str] = Query(None),
-    tag: Optional[str] = Query(None),
-    active_only: bool = True,
-    respect_time_window: bool = True,
+    current_user: User | None = Depends(get_current_user),
 ):
     """
-    List challenges (public view).
-    - Filter by category_id, difficulty, tag.
-    - `active_only=True` hides inactive items.
-    - `respect_time_window=True` enforces visible_from/visible_to against current time.
+    Return active challenges whose time window includes 'now'.
+    Model uses visible_from/visible_to; API uses start_time/end_time.
     """
-    stmt = select(Challenge).order_by(Challenge.created_at.desc())
+    res = await db.execute(select(Challenge))
+    rows = res.scalars().all()
 
-    if active_only:
-        stmt = stmt.where(Challenge.is_active == True)  # noqa: E712
-    if category_id is not None:
-        stmt = stmt.where(Challenge.category_id == category_id)
-    if difficulty:
-        stmt = stmt.where(Challenge.difficulty == difficulty)
-    if tag:
-        stmt = stmt.join(ChallengeTag).where(ChallengeTag.tag == tag)
+    now = datetime.now(timezone.utc)
 
-    rows: List[Challenge] = (await db.execute(stmt)).scalars().unique().all()
+    def to_aware(dt):
+        if dt is None:
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
-    # Time window filtering
-    now = datetime.now(timezone.utc) if respect_time_window else None
-    visible: List[Challenge] = []
+    visible: list[ChallengePublic] = []
     for c in rows:
-        if not respect_time_window:
-            visible.append(c)
+        if not c.is_active:
             continue
 
-        st = _to_aware(c.visible_from)
-        et = _to_aware(c.visible_to)
+        st = to_aware(getattr(c, "visible_from", None))
+        et = to_aware(getattr(c, "visible_to", None))
 
         if st and now < st:
             continue
         if et and now > et:
             continue
-        visible.append(c)
 
-    # Build output with solves count
-    out: List[ChallengePublic] = []
-    for ch in visible:
-        solves = await _solves_count(db, ch.id)
-        out.append(_to_public_schema(ch, solves))
-    return out
+        visible.append(
+            ChallengePublic(
+                id=c.id,
+                title=c.title,
+                description=c.description,
+                category_id=getattr(c, "category_id", None),
+                points=c.points,
+                difficulty=c.difficulty,
+                is_active=c.is_active,
+                start_time=st,
+                end_time=et,
+                created_at=getattr(c, "created_at", None),
+                solves=0,
+            )
+        )
+    return visible
 
 
-<<<<<<< HEAD
 @router.patch("/challenges/{challenge_id}", response_model=ChallengePublic)
 async def update_challenge(
     challenge_id: int,
@@ -209,8 +127,7 @@ async def update_challenge(
 
     # Map API -> model where needed
     if "flag" in challenge_update:
-        # ✅ write to flag_hash, do not keep raw flag
-        challenge_update["flag_hash"] = hash_flag(challenge_update.pop("flag"))
+        challenge_update["flag"] = hash_flag(challenge_update["flag"])
     if "start_time" in challenge_update:
         challenge_update["visible_from"] = challenge_update.pop("start_time")
     if "end_time" in challenge_update:
@@ -219,15 +136,8 @@ async def update_challenge(
     for k, v in challenge_update.items():
         setattr(ch, k, v)
 
-    try:
-        await db.flush()
-        await db.commit()
-        await db.refresh(ch)
-    except IntegrityError as e:
-        await db.rollback()
-        if "uq_challenge_event_slug" in str(e.orig):
-            raise HTTPException(status_code=409, detail="Slug already used for this event")
-        raise HTTPException(status_code=400, detail="Integrity error while updating challenge")
+    await db.commit()
+    await db.refresh(ch)
 
     return ChallengePublic(
         id=ch.id,
@@ -246,83 +156,40 @@ async def update_challenge(
 
 @router.delete("/challenges/{challenge_id}", status_code=204)
 async def delete_challenge(
-=======
-@router.get("/{challenge_id}", response_model=ChallengePublic)
-async def get_challenge(
->>>>>>> dc38fea0bef3efc392b1dd0bb40ff2baaacbdc85
     challenge_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    user=Depends(require_admin),
 ):
-    """
-    Get a single challenge (public view).
-    Hides inactive/hidden challenges with a generic 404.
-    """
-    ch = await db.get(Challenge, challenge_id)
-    if not ch or not ch.is_active:
+    result = await db.execute(select(Challenge).where(Challenge.id == challenge_id))
+    ch = result.scalar_one_or_none()
+    if not ch:
         raise HTTPException(status_code=404, detail="Challenge not found")
-
-    # Respect visibility window
-    now = datetime.now(timezone.utc)
-    st = _to_aware(ch.visible_from)
-    et = _to_aware(ch.visible_to)
-    if (st and now < st) or (et and now > et):
-        raise HTTPException(status_code=404, detail="Challenge not found")
-
-    solves = await _solves_count(db, ch.id)
-    return _to_public_schema(ch, solves)
+    await db.delete(ch)
+    await db.commit()
+    return None
 
 
-@router.get("/{challenge_id}/solvers")
+@router.get("/challenges/{challenge_id}/solvers")
 async def get_challenge_solvers(
     challenge_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-    freeze_until: Optional[str] = Query(
-        None,
-        description="Anti-cheat: ISO-8601 UTC timestamp. Solves after this are hidden. "
-                    "If omitted, uses SCOREBOARD_FREEZE_AT env var if set.",
-    ),
 ):
-    """
-    List solvers for a challenge in solve order (first blood first).
-    Anti-cheat: hide solves after the freeze time if provided.
-    """
-    freeze = _parse_iso8601(freeze_until) or _parse_iso8601(os.getenv("SCOREBOARD_FREEZE_AT"))
-
     stmt = (
         select(Submission, User, Team)
         .join(User, Submission.user_id == User.id)
         .join(Team, User.team_id == Team.id, isouter=True)
-        .where(
-            Submission.challenge_id == challenge_id,
-            cast(Submission.is_correct, Boolean) == True,  # noqa: E712
-        )
-        .order_by(Submission.submitted_at.asc())
+        .where(Submission.challenge_id == challenge_id, Submission.is_correct == True)
+        .order_by(Submission.submitted_at)
     )
+    result = await db.execute(stmt)
+    rows = result.all()
 
-    if freeze is not None:
-        stmt = stmt.where(Submission.submitted_at <= freeze)
-
-    rows = (await db.execute(stmt)).all()
-
-    # mark first_blood on the earliest correct submission, if any (within freeze window if applied)
-    first_blood_seen = False
-    out = []
-    for submission, user, team in rows:
-        first_blood = False
-        if not first_blood_seen:
-            first_blood = True
-            first_blood_seen = True
-
-        out.append(
-            {
-                "team": team.team_name if team else None,
-                "user": user.username,
-                "timestamp": submission.submitted_at.isoformat(),
-                "first_blood": first_blood,
-                "points_awarded": submission.points_awarded or 0,
-                "used_hint_ids": submission.used_hint_ids.split(",") if submission.used_hint_ids else [],
-            }
-        )
-    return out
+    return [
+        {
+            "team": team.team_name if team else None,
+            "user": user.username,
+            "timestamp": submission.submitted_at.isoformat(),
+            "first_blood": getattr(submission, "first_blood", False),
+        }
+        for submission, user, team in rows
+    ]
