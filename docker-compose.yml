@@ -44,16 +44,6 @@ services:
     networks:
       - ctf_net
 
-<<<<<<< HEAD
-  # Example challenge container
- # challenge1:
-    #build:
-    #  context: ./challenges/challenge1
-   # ports:
-    #  - "9001:9000"
-   # networks:
-     # - ctf_net 
-=======
   # Example challenge container (disabled unless the "challenges" profile is enabled)
   challenge1:
     build:
@@ -63,7 +53,6 @@ services:
     networks:
       - ctf_net
     profiles: ["challenges"]
->>>>>>> dc38fea0bef3efc392b1dd0bb40ff2baaacbdc85
 
   # Add additional challenge containers as needed
   # challenge2:
