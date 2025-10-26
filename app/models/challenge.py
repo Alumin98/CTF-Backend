@@ -11,6 +11,8 @@ from app.database import Base
 # - app/models/hint.py defines Hint with back_populates="challenge"
 from app.models.challenge_tag import ChallengeTag  # provides .tag and challenge_id FK
 from app.models.hint import Hint                   # provides text/penalty/order_index and challenge_id FK
+from app.models.challenge_instance import ChallengeInstance  # circular import safe for typing
+from app.models.challenge_attachment import ChallengeAttachment
 
 if TYPE_CHECKING:
     from app.models.submission import Submission
@@ -53,6 +55,18 @@ class Challenge(Base):
     )
 
     submissions = relationship("Submission", back_populates="challenge", lazy="selectin")
+    instances = relationship(
+        "ChallengeInstance",
+        back_populates="challenge",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    attachments = relationship(
+        "ChallengeAttachment",
+        back_populates="challenge",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     # OPTIONAL: if you have a parent->children unlock chain:
     # children = relationship("Challenge", remote_side=[id])

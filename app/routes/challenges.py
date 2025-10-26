@@ -8,17 +8,96 @@ from app.auth_token import require_admin
 from app.routes.auth import hash_flag
 
 from app.models.challenge import Challenge
+from app.models.challenge_instance import ChallengeInstance
 from app.models.submission import Submission
 from app.models.user import User
 from app.models.team import Team
 
-from app.schemas import ChallengeCreate, ChallengePublic
+from app.schemas import (
+    AttachmentRead,
+    ChallengeCreate,
+    ChallengeInstanceRead,
+    ChallengePublic,
+    HintRead,
+)
+from app.models.challenge_attachment import ChallengeAttachment
+from app.models.hint import Hint
 
 router = APIRouter()
 
 # If you have a real dependency, wire it in; otherwise keep it permissive.
 def get_current_user():
     return None
+
+
+def _attachment_to_schema(challenge_id: int, attachment: ChallengeAttachment) -> AttachmentRead:
+    return AttachmentRead(
+        id=attachment.id,
+        filename=attachment.filename,
+        content_type=attachment.content_type,
+        url=f"/challenges/{challenge_id}/attachments/{attachment.id}",
+        filesize=attachment.filesize,
+    )
+
+
+def _hint_to_schema(hint: Hint) -> HintRead:
+    return HintRead(
+        id=getattr(hint, "id", 0),
+        text=hint.text,
+        penalty=hint.penalty,
+        order_index=hint.order_index,
+    )
+
+
+def _challenge_to_public(
+    challenge: Challenge,
+    solves: int = 0,
+    instance: ChallengeInstance | None = None,
+) -> ChallengePublic:
+    hints = sorted(getattr(challenge, "hints", []) or [], key=lambda h: getattr(h, "order_index", 0))
+    attachments = getattr(challenge, "attachments", []) or []
+    active_instance = None
+    if instance is not None:
+        active_instance = ChallengeInstanceRead.model_validate(instance)
+    return ChallengePublic(
+        id=challenge.id,
+        title=challenge.title,
+        description=challenge.description,
+        category_id=getattr(challenge, "category_id", None),
+        points=challenge.points,
+        difficulty=challenge.difficulty,
+        created_at=getattr(challenge, "created_at", None),
+        competition_id=getattr(challenge, "competition_id", None),
+        unlocked_by_id=getattr(challenge, "unlocked_by_id", None),
+        is_active=challenge.is_active,
+        is_private=challenge.is_private,
+        visible_from=getattr(challenge, "visible_from", None),
+        visible_to=getattr(challenge, "visible_to", None),
+        tags=challenge.tag_strings,
+        hints=[_hint_to_schema(h) for h in hints],
+        attachments=[_attachment_to_schema(challenge.id, att) for att in attachments],
+        active_instance=active_instance,
+        solves_count=solves,
+    )
+
+
+def _as_aware(dt):
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _select_display_instance(instance: ChallengeInstance) -> ChallengeInstance | None:
+    if instance.status == "stopped":
+        return None
+
+    instance.started_at = _as_aware(getattr(instance, "started_at", None))
+    instance.expires_at = _as_aware(getattr(instance, "expires_at", None))
+
+    if instance.expires_at and instance.expires_at < datetime.now(timezone.utc):
+        return None
+
+    return instance
 
 
 @router.post("/challenges/", response_model=ChallengePublic)
@@ -41,22 +120,9 @@ async def create_challenge(
         new_ch = Challenge(**data)
         db.add(new_ch)
         await db.commit()
-        await db.refresh(new_ch)
+        await db.refresh(new_ch, attribute_names=["hints", "tags", "attachments"])
 
-        # Manually map model -> API schema fields (include required fields!)
-        return ChallengePublic(
-            id=new_ch.id,
-            title=new_ch.title,
-            description=new_ch.description,
-            category_id=getattr(new_ch, "category_id", None),
-            points=new_ch.points,
-            difficulty=new_ch.difficulty,
-            is_active=new_ch.is_active,
-            start_time=new_ch.visible_from,
-            end_time=new_ch.visible_to,
-            created_at=getattr(new_ch, "created_at", None),
-            solves=0,
-        )
+        return _challenge_to_public(new_ch)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -77,18 +143,33 @@ async def list_challenges(
 
     now = datetime.now(timezone.utc)
 
-    def to_aware(dt):
-        if dt is None:
-            return None
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    instances_by_challenge: dict[int, ChallengeInstance] = {}
+    if current_user:
+        challenge_ids = [c.id for c in rows if getattr(c, "id", None) is not None]
+        if challenge_ids:
+            stmt_instances = (
+                select(ChallengeInstance)
+                .where(
+                    ChallengeInstance.user_id == current_user.id,
+                    ChallengeInstance.challenge_id.in_(challenge_ids),
+                )
+                .order_by(ChallengeInstance.challenge_id, ChallengeInstance.created_at.desc())
+            )
+            instance_rows = await db.execute(stmt_instances)
+            for inst in instance_rows.scalars().all():
+                if inst.challenge_id in instances_by_challenge:
+                    continue
+                display_instance = _select_display_instance(inst)
+                if display_instance:
+                    instances_by_challenge[inst.challenge_id] = display_instance
 
     visible: list[ChallengePublic] = []
     for c in rows:
         if not c.is_active:
             continue
 
-        st = to_aware(getattr(c, "visible_from", None))
-        et = to_aware(getattr(c, "visible_to", None))
+        st = _as_aware(getattr(c, "visible_from", None))
+        et = _as_aware(getattr(c, "visible_to", None))
 
         if st and now < st:
             continue
@@ -96,18 +177,9 @@ async def list_challenges(
             continue
 
         visible.append(
-            ChallengePublic(
-                id=c.id,
-                title=c.title,
-                description=c.description,
-                category_id=getattr(c, "category_id", None),
-                points=c.points,
-                difficulty=c.difficulty,
-                is_active=c.is_active,
-                start_time=st,
-                end_time=et,
-                created_at=getattr(c, "created_at", None),
-                solves=0,
+            _challenge_to_public(
+                c,
+                instance=instances_by_challenge.get(getattr(c, "id", None)),
             )
         )
     return visible
@@ -137,21 +209,9 @@ async def update_challenge(
         setattr(ch, k, v)
 
     await db.commit()
-    await db.refresh(ch)
+    await db.refresh(ch, attribute_names=["hints", "tags", "attachments"])
 
-    return ChallengePublic(
-        id=ch.id,
-        title=ch.title,
-        description=ch.description,
-        category_id=getattr(ch, "category_id", None),
-        points=ch.points,
-        difficulty=ch.difficulty,
-        is_active=ch.is_active,
-        start_time=getattr(ch, "visible_from", None),
-        end_time=getattr(ch, "visible_to", None),
-        created_at=getattr(ch, "created_at", None),
-        solves=0,
-    )
+    return _challenge_to_public(ch)
 
 
 @router.delete("/challenges/{challenge_id}", status_code=204)

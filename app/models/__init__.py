@@ -11,3 +11,5 @@ from app.models.event_challenge import EventChallenge
 from app.models.submission import Submission
 from app.models.activity_log import ActivityLog
 from app.models.admin_action import AdminAction
+from app.models.challenge_instance import ChallengeInstance
+from app.models.challenge_attachment import ChallengeAttachment

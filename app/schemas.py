@@ -32,6 +32,19 @@ class UserProfile(BaseModel):
     created_at: datetime
 
 
+class UserProfileRead(UserProfile):
+    display_name: Optional[str] = None
+    bio: Optional[str] = None
+
+
+class UserProfileUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+    display_name: Optional[str] = None
+    bio: Optional[str] = None
+
+
 # ============================================================
 # Teams
 # ============================================================
@@ -89,6 +102,28 @@ class HintRead(BaseModel):
     text: str
     penalty: int
     order_index: int
+
+
+class AttachmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    filename: str
+    content_type: Optional[str] = None
+    url: Optional[str] = None
+    filesize: Optional[int] = None
+
+
+class ChallengeInstanceRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    status: str
+    container_id: Optional[str] = None
+    connection_info: Optional[dict] = None
+    started_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    error_message: Optional[str] = None
 
 
 # ---- Challenge base / create / update ----
@@ -159,6 +194,8 @@ class ChallengePublic(BaseModel):
     # derived / related
     tags: List[str] = []
     hints: List[HintRead] = []
+    attachments: List[AttachmentRead] = []
+    active_instance: Optional[ChallengeInstanceRead] = None
     solves_count: int = 0  # fill in route from related table
 
 
@@ -184,6 +221,7 @@ class ChallengeAdmin(BaseModel):
     visible_to: Optional[datetime] = None
     tags: List[str] = []
     hints: List[HintRead] = []
+    attachments: List[AttachmentRead] = []
     solves_count: int = 0
 
 

@@ -1,7 +1,7 @@
 import logging
 from datetime import timezone
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -12,10 +12,12 @@ from app.models.challenge import Challenge
 from app.models.hint import Hint
 from app.models.challenge_tag import ChallengeTag
 from app.models.submission import Submission  # used to count solves
+from app.models.challenge_attachment import ChallengeAttachment
 from app.routes.auth import hash_flag
 from app.schemas import (
-    ChallengeCreate, ChallengeUpdate, ChallengeAdmin, HintCreate
+    ChallengeCreate, ChallengeUpdate, ChallengeAdmin, HintCreate, AttachmentRead
 )
+from app.services import get_attachment_storage
 
 admin = APIRouter(prefix="/admin/challenges", tags=["Admin: Challenges"])
 logger = logging.getLogger(__name__)
@@ -76,6 +78,16 @@ async def _solves_count(db: AsyncSession, challenge_id: int) -> int:
     return (await db.execute(q)).scalar_one()
 
 def _to_admin_schema(ch: Challenge, solves: int) -> ChallengeAdmin:
+    attachments = [
+        AttachmentRead(
+            id=a.id,
+            filename=a.filename,
+            content_type=a.content_type,
+            filesize=a.filesize,
+            url=f"/challenges/{ch.id}/attachments/{a.id}",
+        )
+        for a in sorted(getattr(ch, "attachments", []) or [], key=lambda att: att.id)
+    ]
     return ChallengeAdmin(
         id=ch.id,
         title=ch.title,
@@ -92,6 +104,7 @@ def _to_admin_schema(ch: Challenge, solves: int) -> ChallengeAdmin:
         visible_to=ch.visible_to,
         tags=ch.tag_strings,
         hints=sorted(ch.hints or [], key=lambda h: h.order_index),
+        attachments=attachments,
         solves_count=solves,
     )
 
@@ -127,7 +140,7 @@ async def create_challenge(
     await db.flush()  # get ch.id
 
     await db.commit()
-    await db.refresh(ch)
+    await db.refresh(ch, attribute_names=["attachments", "hints", "tags"])
 
     solves = await _solves_count(db, ch.id)
     return _to_admin_schema(ch, solves)
@@ -168,6 +181,56 @@ async def get_challenge_admin(
         raise HTTPException(404, "Challenge not found")
     solves = await _solves_count(db, ch.id)
     return _to_admin_schema(ch, solves)
+
+
+@admin.post("/{challenge_id}/attachments", response_model=AttachmentRead, status_code=201)
+async def upload_attachment_admin(
+    challenge_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    challenge = await db.get(Challenge, challenge_id)
+    if not challenge:
+        raise HTTPException(404, "Challenge not found")
+
+    storage = get_attachment_storage()
+    original_name = file.filename or "attachment.bin"
+    result = await storage.save(file)
+    attachment = ChallengeAttachment(
+        challenge_id=challenge_id,
+        filename=original_name,
+        content_type=file.content_type,
+        storage_backend=result.backend,
+        storage_path=result.path,
+        filesize=result.size,
+    )
+    db.add(attachment)
+    await db.commit()
+    await db.refresh(attachment)
+    return AttachmentRead(
+        id=attachment.id,
+        filename=attachment.filename,
+        content_type=attachment.content_type,
+        filesize=attachment.filesize,
+        url=f"/challenges/{challenge_id}/attachments/{attachment.id}",
+    )
+
+
+@admin.delete("/{challenge_id}/attachments/{attachment_id}", status_code=204)
+async def delete_attachment_admin(
+    challenge_id: int,
+    attachment_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    attachment = await db.get(ChallengeAttachment, attachment_id)
+    if not attachment or attachment.challenge_id != challenge_id:
+        raise HTTPException(404, "Attachment not found")
+    storage = get_attachment_storage()
+    await storage.delete(attachment)
+    await db.delete(attachment)
+    await db.commit()
 
 @admin.patch("/{challenge_id}", response_model=ChallengeAdmin)
 async def update_challenge_admin(
@@ -210,7 +273,7 @@ async def update_challenge_admin(
             ch.hints.append(Hint(text=h.text, penalty=h.penalty, order_index=h.order_index))
 
     await db.commit()
-    await db.refresh(ch)
+    await db.refresh(ch, attribute_names=["attachments", "hints", "tags"])
 
     solves = await _solves_count(db, ch.id)
     return _to_admin_schema(ch, solves)
