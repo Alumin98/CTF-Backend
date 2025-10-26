@@ -3,7 +3,7 @@ import logging
 import traceback
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth_token import get_current_user
@@ -172,11 +172,14 @@ async def delete_team(
     team.deleted_by_user_id = user.id
     db.add(team)
 
-    result = await db.execute(select(User).where(User.team_id == team_id))
-    members = result.scalars().all()
-    for member in members:
-        member.team_id = None
-        db.add(member)
+    # Ensure no one remains linked to this team (robust bulk update)
+    # Also clear leader relationship to avoid dangling FK references
+    team.leader_id = None
+    await db.execute(
+        update(User)
+        .where(User.team_id == team_id)
+        .values(team_id=None)
+    )
 
     await db.commit()
     return
