@@ -140,6 +140,7 @@ async def join_team(
         raise HTTPException(status_code=500, detail="Join team failed.")
 
 
+
 @router.get("/teams/{team_id}/members", response_model=list[UserProfile])
 async def get_team_members(team_id: int, db: AsyncSession = Depends(get_db)):
     team_res = await db.execute(select(Team).where(Team.id == team_id))
