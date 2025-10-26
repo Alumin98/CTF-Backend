@@ -11,6 +11,7 @@ from app.models.challenge import Challenge
 from app.models.submission import Submission
 from app.models.user import User
 from app.models.team import Team
+from app.models.hint import Hint
 
 from app.schemas import ChallengeCreate, ChallengePublic
 
@@ -27,23 +28,37 @@ async def create_challenge(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_admin),
 ):
-    """
-    Create a challenge.
-    - Hash the flag before storing.
-    - Map API 'start_time'/'end_time' -> model 'visible_from'/'visible_to'.
-    """
     try:
         data = challenge.dict()
-        data["flag"] = hash_flag(challenge.flag)
+
+        # Map fields + hash flag
+        data["flag"] = hash_flag(challenge.flag) if challenge.flag is not None else None
         data["visible_from"] = data.pop("start_time", None)
         data["visible_to"] = data.pop("end_time", None)
 
+        # Pull relationship inputs out BEFORE constructing the model
+        tags = data.pop("tags", None)
+        hints = data.pop("hints", None)
+
         new_ch = Challenge(**data)
+
+        # Apply hints
+        if hints:
+            for h in hints:
+                new_ch.hints.append(
+                    Hint(text=h["text"], penalty=h["penalty"], order_index=h["order_index"])
+                    if isinstance(h, dict)
+                    else Hint(text=h.text, penalty=h.penalty, order_index=h.order_index)
+                )
+
+        # Apply tags (if your model has this helper)
+        if tags:
+            new_ch.set_tag_strings(tags)
+
         db.add(new_ch)
         await db.commit()
         await db.refresh(new_ch)
 
-        # Manually map model -> API schema fields (include required fields!)
         return ChallengePublic(
             id=new_ch.id,
             title=new_ch.title,
