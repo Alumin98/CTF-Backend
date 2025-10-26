@@ -101,26 +101,31 @@ async def join_team(
     current_user = Depends(get_current_user)
 ):
     try:
-        # Make sure team exists
-        result = await db.execute(select(Team).where(Team.id == team_id))
-        team = result.scalar_one_or_none()
+        # 1) Target team must exist and not be deleted
+        team = (await db.execute(select(Team).where(Team.id == team_id))).scalar_one_or_none()
         if not team:
             raise HTTPException(status_code=404, detail="Team not found")
-
-        if hasattr(team, "is_deleted") and team.is_deleted:
+        if getattr(team, "is_deleted", False):
             raise HTTPException(status_code=400, detail="Team is deleted.")
 
-        # Fetch user
-        user_result = await db.execute(select(User).where(User.id == current_user.id))
-        db_user = user_result.scalar_one_or_none()
+        # 2) Load the user fresh from DB
+        db_user = (await db.execute(select(User).where(User.id == current_user.id))).scalar_one_or_none()
         if not db_user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        if db_user.team_id == team_id:
-            return {"message": "Already a member of this team."}
+        # 3) Auto-clear dangling membership (team deleted or missing)
         if db_user.team_id is not None:
-            raise HTTPException(status_code=400, detail="Already in a team.")
+            current_team = await db.get(Team, db_user.team_id)
+            if current_team is None or getattr(current_team, "is_deleted", False):
+                # Heal the stale link and continue
+                db_user.team_id = None
+                await db.flush()
+            else:
+                if db_user.team_id == team_id:
+                    return {"message": "Already a member of this team."}
+                raise HTTPException(status_code=400, detail="Already in a team.")
 
+        # 4) Join
         db_user.team_id = team_id
         await db.commit()
         await db.refresh(db_user)
@@ -128,12 +133,12 @@ async def join_team(
         return {"message": f"Joined team {team.team_name}"}
 
     except HTTPException:
-        raise  # let normal FastAPI handling work
-    except Exception as e:
-        # print traceback to logs
+        raise
+    except Exception:
         logger.error("Error joining team", exc_info=True)
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Join team failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Join team failed.")
+
 
 @router.get("/teams/{team_id}/members", response_model=list[UserProfile])
 async def get_team_members(team_id: int, db: AsyncSession = Depends(get_db)):
