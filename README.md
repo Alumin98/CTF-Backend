@@ -44,18 +44,16 @@ If no challenge containers are present you can ignore that profile; the core sta
 ## Environment
 `.env.docker` is loaded into the backend container.
 ```
-DATABASE_URL=postgresql://postgres:crDJrMIjfkHEZDuElDBFMIduQtsHAksF@nozomi.proxy.rlwy.net:38969/railway
+DATABASE_URL=postgresql+asyncpg://ctf_user:ctf_pass@db:5432/ctf_db
 JWT_SECRET=supersecretfortheCTF
 JWT_ALGORITHM=HS256
 JWT_EXPIRY_MINUTES=60
 ```
 
 > **Note**
-> The backend normalises `postgresql://` URLs to `postgresql+asyncpg://` automatically, so the
-> Railway connection string above works out of the box. If you prefer to run against the bundled
-> Postgres container instead, replace the value with
-> `postgresql+asyncpg://ctf_user:ctf_pass@db:5432/ctf_db` and run `docker compose down -v` before
-> restarting so a fresh local database is created.
+> When pointing the API at a hosted PostgreSQL instance, update `DATABASE_URL` with that
+> connection string instead. Run `docker compose down -v` before restarting so a fresh local
+> database is created if you switch back to the bundled Postgres service.
 
 You can tweak database boot timing with optional overrides:
 
