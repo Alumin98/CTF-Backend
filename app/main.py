@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 from app import database
+from app.services import get_container_service
 
 # ----- Load environment variables -----
 load_dotenv()
@@ -24,13 +25,16 @@ logging.basicConfig(
 from app.models import (  # noqa: F401 (imported for side effects)
     user, role, team, team_member, category, challenge,
     challenge_tag, event, hint, event_challenge,
-    submission, activity_log, admin_action, competition, achievement
+    submission, activity_log, admin_action, competition, achievement,
+    challenge_instance, challenge_attachment,
 )
 
 # ----- Routers -----
 from app.routes.auth import router as auth_router
 from app.routes.teams import router as team_router
 from app.routes.challenges import router as challenge_router         # public challenges
+from app.routes.challenge_instances import router as instance_router
+from app.routes.attachments import router as attachments_router
 from app.routes.admin_challenges import admin as admin_chal_router   # NEW: admin challenges
 from app.routes.submissions import router as submission_router
 from app.routes import competition as competition_routes
@@ -66,7 +70,9 @@ if raw_origins:
 app.include_router(auth_router, prefix="/auth")
 app.include_router(team_router)
 app.include_router(challenge_router)       # /challenges ...
-app.include_router(admin_chal_router)      
+app.include_router(instance_router)
+app.include_router(attachments_router)
+app.include_router(admin_chal_router)
 app.include_router(submission_router)
 app.include_router(competition_routes.router)
 app.include_router(password_reset_router)
@@ -98,6 +104,32 @@ async def _ensure_first_blood_column(conn):
             )
         ):
             raise
+
+
+async def _ensure_user_profile_columns(conn):
+    statements = []
+    if conn.dialect.name == "sqlite":
+        statements.append("ALTER TABLE users ADD COLUMN display_name TEXT")
+        statements.append("ALTER TABLE users ADD COLUMN bio TEXT")
+    else:
+        statements.append("ALTER TABLE users ADD COLUMN display_name VARCHAR(120)")
+        statements.append("ALTER TABLE users ADD COLUMN bio TEXT")
+
+    for ddl in statements:
+        try:
+            await conn.execute(text(ddl))
+        except DBAPIError as ddl_error:
+            message = str(getattr(ddl_error, "orig", ddl_error)).lower()
+            if not any(
+                phrase in message
+                for phrase in (
+                    "duplicate column name",
+                    "already exists",
+                    'column "display_name" of relation "users" already exists',
+                    'column "bio" of relation "users" already exists',
+                )
+            ):
+                raise
 
 
 @app.on_event("startup")
@@ -138,6 +170,7 @@ async def on_startup():
                         )
                     ):
                         raise
+                await _ensure_user_profile_columns(conn)
         except (OperationalError, DBAPIError, OSError) as exc:  # pragma: no cover - depends on timing
             if attempt >= max_attempts:
                 allow_sqlite_fallback = os.getenv("DB_ALLOW_SQLITE_FALLBACK", "1").lower() in {
@@ -181,6 +214,8 @@ async def on_startup():
                 "CTF backend API started and database tables ensured (using %s).",
                 database.CURRENT_DATABASE_URL,
             )
+            service = get_container_service()
+            await service.start_cleanup_task(database.SessionLocal)
             break
 
 # ----- Health check endpoint -----
@@ -194,3 +229,9 @@ if os.getenv("DATABASE_URL"):
     logging.info("DATABASE_URL loaded.")
 if os.getenv("JWT_SECRET"):
     logging.info("JWT_SECRET loaded.")
+# ----- Shutdown: stop background tasks -----
+@app.on_event("shutdown")
+async def on_shutdown():
+    service = get_container_service()
+    await service.stop_cleanup_task()
+

@@ -11,7 +11,13 @@ from sqlalchemy.future import select
 from app.auth_token import create_access_token, get_current_user
 from app.database import get_db
 from app.models.user import User
-from app.schemas import UserLogin, UserProfile, UserRegister
+from app.schemas import (
+    UserLogin,
+    UserProfile,
+    UserProfileRead,
+    UserProfileUpdate,
+    UserRegister,
+)
 from app.security import pwd_context
 
 router = APIRouter()
@@ -52,14 +58,53 @@ async def login(
     token = create_access_token({"user_id": db_user.id})
     return {"access_token": token, "token_type": "bearer"}
 
-@router.get("/me")
+@router.get("/me", response_model=UserProfileRead)
 async def read_users_me(current_user: User = Depends(get_current_user)):
-    return {
-        "id": current_user.id,
-        "username": current_user.username,
-        "email": current_user.email,
-        "created_at": current_user.created_at
-    }
+    return UserProfileRead.model_validate(current_user)
+
+
+@router.patch("/me", response_model=UserProfileRead)
+async def update_profile(
+    payload: UserProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    changed = False
+
+    if payload.username and payload.username != current_user.username:
+        result = await db.execute(select(User).where(User.username == payload.username))
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Username already taken")
+        current_user.username = payload.username
+        changed = True
+
+    if payload.email and payload.email != current_user.email:
+        result = await db.execute(select(User).where(User.email == payload.email))
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Email already registered")
+        current_user.email = payload.email
+        changed = True
+
+    if payload.password:
+        if len(payload.password) < 8:
+            raise HTTPException(status_code=400, detail="Password too short")
+        current_user.password_hash = pwd_context.hash(payload.password)
+        changed = True
+
+    if payload.display_name is not None:
+        current_user.display_name = payload.display_name
+        changed = True
+
+    if payload.bio is not None:
+        current_user.bio = payload.bio
+        changed = True
+
+    if changed:
+        db.add(current_user)
+        await db.commit()
+        await db.refresh(current_user)
+
+    return UserProfileRead.model_validate(current_user)
 
 @router.post("/make-me-admin")
 async def make_me_admin(

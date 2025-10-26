@@ -7,6 +7,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.submission import Submission
+    from app.models.challenge_instance import ChallengeInstance
 
 class User(Base):
     __tablename__ = "users"
@@ -20,9 +21,17 @@ class User(Base):
     reset_token_hash = Column(String(64), nullable=True, index=True)
     reset_token_expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime, default=func.now())
+    display_name = Column(String(120), nullable=True)
+    bio = Column(String, nullable=True)
 
     team = relationship("Team", back_populates="members", foreign_keys=[team_id])
     submissions = relationship("Submission", back_populates="user", lazy="selectin")
+    challenge_instances = relationship(
+        "ChallengeInstance",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     # NEW: if user is leader of a team
     leading_team = relationship(

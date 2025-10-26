@@ -13,4 +13,7 @@ argon2-cffi
 
 argon2-cffi
 pytest
+docker
+aiofiles
+boto3
 
