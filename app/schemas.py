@@ -124,6 +124,7 @@ class ChallengeInstanceRead(BaseModel):
     started_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    access_url: Optional[str] = None
 
 
 # ---- Challenge base / create / update ----
@@ -196,6 +197,7 @@ class ChallengePublic(BaseModel):
     hints: List[HintRead] = []
     attachments: List[AttachmentRead] = []
     active_instance: Optional[ChallengeInstanceRead] = None
+    access_url: Optional[str] = None
     solves_count: int = 0  # fill in route from related table
 
 
@@ -222,6 +224,8 @@ class ChallengeAdmin(BaseModel):
     tags: List[str] = []
     hints: List[HintRead] = []
     attachments: List[AttachmentRead] = []
+    active_instance: Optional[ChallengeInstanceRead] = None
+    access_url: Optional[str] = None
     solves_count: int = 0
 
 

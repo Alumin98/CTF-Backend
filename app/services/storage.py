@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import pathlib
+import re
 from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 
@@ -33,7 +34,7 @@ class StorageResult:
 class AttachmentStorage:
     backend_name = "base"
 
-    async def save(self, upload: UploadFile) -> StorageResult:  # pragma: no cover - interface only
+    async def save(self, challenge_id: int, upload: UploadFile) -> StorageResult:  # pragma: no cover
         raise NotImplementedError
 
     async def delete(self, attachment: ChallengeAttachment) -> None:  # pragma: no cover - interface only
@@ -54,22 +55,33 @@ class LocalAttachmentStorage(AttachmentStorage):
         self.base_path = pathlib.Path(base_path).resolve()
         self.base_path.mkdir(parents=True, exist_ok=True)
 
-    def _path_for(self, relative: str) -> pathlib.Path:
-        return self.base_path / relative
+    def _sanitize_filename(self, filename: str) -> str:
+        name = pathlib.Path(filename).name
+        name = re.sub(r"[^A-Za-z0-9._-]", "_", name).strip("._") or "attachment"
+        return name
 
-    async def save(self, upload: UploadFile) -> StorageResult:
-        filename = pathlib.Path(upload.filename or "attachment").name
+    def _path_for(self, challenge_id: int, filename: str) -> pathlib.Path:
+        directory = (self.base_path / str(challenge_id)).resolve()
+        directory.mkdir(parents=True, exist_ok=True)
+        path = (directory / filename).resolve()
+        if not path.is_relative_to(self.base_path):
+            raise HTTPException(status_code=400, detail="Invalid attachment path")
+        return path
+
+    def _resolve_for_attachment(self, attachment: ChallengeAttachment) -> pathlib.Path:
+        candidate = (self.base_path / attachment.storage_path).resolve()
+        if not candidate.is_relative_to(self.base_path):
+            raise HTTPException(status_code=400, detail="Invalid attachment path")
+        return candidate
+
+    async def save(self, challenge_id: int, upload: UploadFile) -> StorageResult:
+        filename = self._sanitize_filename(upload.filename or "attachment")
         safe_name = f"{int(asyncio.get_running_loop().time() * 1_000_000)}_{filename}"
-        path = self._path_for(safe_name)
+        path = self._path_for(challenge_id, safe_name)
 
         if aiofiles is None:
             data = await upload.read()
-
-            def _write():
-                path.write_bytes(data)
-                return len(data)
-
-            size = await asyncio.to_thread(_write)
+            size = await asyncio.to_thread(lambda: path.write_bytes(data) or len(data))
         else:
             size = 0
             async with aiofiles.open(path, "wb") as buffer:
@@ -80,16 +92,24 @@ class LocalAttachmentStorage(AttachmentStorage):
                     size += len(chunk)
                     await buffer.write(chunk)
         await upload.close()
-        return StorageResult(backend=self.backend_name, path=safe_name, size=size)
+        relative = f"{challenge_id}/{safe_name}"
+        return StorageResult(backend=self.backend_name, path=relative, size=size)
 
     async def delete(self, attachment: ChallengeAttachment) -> None:
         try:
-            self._path_for(attachment.storage_path).unlink()
+            path = self._resolve_for_attachment(attachment)
+            path.unlink()
+            parent = path.parent
+            if parent != self.base_path:
+                try:
+                    parent.rmdir()
+                except OSError:
+                    pass
         except FileNotFoundError:  # pragma: no cover - fine if already gone
             pass
 
     async def open(self, attachment: ChallengeAttachment) -> AsyncIterator[bytes]:
-        file_path = self._path_for(attachment.storage_path)
+        file_path = self._resolve_for_attachment(attachment)
 
         async def iterator():
             if aiofiles is None:
@@ -104,6 +124,12 @@ class LocalAttachmentStorage(AttachmentStorage):
                         yield chunk
 
         return iterator()
+
+    def get_file_path(self, attachment: ChallengeAttachment) -> pathlib.Path:
+        path = self._resolve_for_attachment(attachment)
+        if not path.exists():
+            raise FileNotFoundError(path)
+        return path
 
 
 class S3AttachmentStorage(AttachmentStorage):
@@ -123,8 +149,10 @@ class S3AttachmentStorage(AttachmentStorage):
         )
         self.ttl = int(os.getenv("ATTACHMENT_S3_URL_TTL", "900"))
 
-    async def save(self, upload: UploadFile) -> StorageResult:
-        key = f"{int(asyncio.get_running_loop().time() * 1_000_000)}_{pathlib.Path(upload.filename or 'attachment').name}"
+    async def save(self, challenge_id: int, upload: UploadFile) -> StorageResult:
+        filename = pathlib.Path(upload.filename or "attachment").name
+        filename = re.sub(r"[^A-Za-z0-9._-]", "_", filename).strip("._") or "attachment"
+        key = f"{challenge_id}/{int(asyncio.get_running_loop().time() * 1_000_000)}_{filename}"
 
         def _upload():
             self.client.upload_fileobj(upload.file, self.bucket, key)

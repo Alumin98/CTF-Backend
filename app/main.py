@@ -10,7 +10,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 from app import database
-from app.services import get_container_service
+from app.database import async_session
+from app.services.container_service import get_container_service
 
 # ----- Load environment variables -----
 load_dotenv()
@@ -214,8 +215,7 @@ async def on_startup():
                 "CTF backend API started and database tables ensured (using %s).",
                 database.CURRENT_DATABASE_URL,
             )
-            service = get_container_service()
-            await service.start_cleanup_task(database.SessionLocal)
+            await get_container_service().start_cleanup_task(async_session)
             break
 
 # ----- Health check endpoint -----
