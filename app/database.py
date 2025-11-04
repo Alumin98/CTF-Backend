@@ -68,6 +68,7 @@ Base = declarative_base()
 # Public globals that can be reconfigured at runtime.
 engine: AsyncEngine
 SessionLocal: sessionmaker
+async_session: sessionmaker
 CURRENT_DATABASE_URL: str
 
 
@@ -78,10 +79,11 @@ def configure_engine(database_url: str) -> None:
     (e.g. falling back to SQLite when a Postgres instance is unavailable).
     """
 
-    global engine, SessionLocal, CURRENT_DATABASE_URL
+    global engine, SessionLocal, async_session, CURRENT_DATABASE_URL
 
     engine = _build_engine(database_url)
     SessionLocal = _build_session_factory(engine)
+    async_session = SessionLocal
     CURRENT_DATABASE_URL = database_url
 
 

@@ -1,6 +1,6 @@
 """Service layer utilities for background integrations."""
 
-from .containers import ContainerService, get_container_service
+from .container_service import ContainerService, get_container_service
 from .storage import AttachmentStorage, get_attachment_storage
 
 __all__ = [

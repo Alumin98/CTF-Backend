@@ -14,14 +14,16 @@ def test_local_storage_roundtrip(tmp_path: Path):
         storage = LocalAttachmentStorage(base_path=str(storage_path))
 
         upload = UploadFile(filename="note.txt", file=BytesIO(b"hello world"))
-        result = await storage.save(upload)
+        result = await storage.save(7, upload)
 
         assert result.backend == "local"
-        assert (storage_path / result.path).exists()
+        saved_path = storage_path / result.path
+        assert saved_path.exists()
+        assert str(result.path).startswith("7/")
 
         attachment = ChallengeAttachment(
             id=1,
-            challenge_id=1,
+            challenge_id=7,
             filename="note.txt",
             content_type="text/plain",
             storage_backend=result.backend,
@@ -34,5 +36,12 @@ def test_local_storage_roundtrip(tmp_path: Path):
             chunks.append(chunk)
 
         assert b"".join(chunks) == b"hello world"
+
+        resolved = storage.get_file_path(attachment)
+        assert resolved.exists()
+
+        await storage.delete(attachment)
+        assert not resolved.exists()
+        assert not saved_path.exists()
 
     asyncio.run(_run())
