@@ -10,9 +10,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 from app import database
+from app.database import async_session
 from app.services.container_service import get_container_service
-
-async_session = database.async_session
 
 # ----- Load environment variables -----
 load_dotenv()
