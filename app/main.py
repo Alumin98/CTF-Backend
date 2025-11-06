@@ -88,7 +88,7 @@ async def _ensure_first_blood_column(conn):
         )
     else:
         ddl = text(
-            "ALTER TABLE submissions ADD COLUMN first_blood "
+            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS first_blood "
             "BOOLEAN NOT NULL DEFAULT FALSE"
         )
 
@@ -113,8 +113,10 @@ async def _ensure_user_profile_columns(conn):
         statements.append("ALTER TABLE users ADD COLUMN display_name TEXT")
         statements.append("ALTER TABLE users ADD COLUMN bio TEXT")
     else:
-        statements.append("ALTER TABLE users ADD COLUMN display_name VARCHAR(120)")
-        statements.append("ALTER TABLE users ADD COLUMN bio TEXT")
+        statements.append(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(120)"
+        )
+        statements.append("ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT")
 
     for ddl in statements:
         try:
@@ -146,31 +148,7 @@ async def on_startup():
         try:
             async with database.engine.begin() as conn:
                 await conn.run_sync(database.Base.metadata.create_all)
-
-                if conn.dialect.name == "sqlite":
-                    ddl = text(
-                        "ALTER TABLE submissions ADD COLUMN first_blood "
-                        "BOOLEAN NOT NULL DEFAULT 0"
-                    )
-                else:
-                    ddl = text(
-                        "ALTER TABLE submissions ADD COLUMN first_blood "
-                        "BOOLEAN NOT NULL DEFAULT FALSE"
-                    )
-
-                try:
-                    await conn.execute(ddl)
-                except DBAPIError as ddl_error:  # column may already exist
-                    message = str(getattr(ddl_error, "orig", ddl_error)).lower()
-                    if not any(
-                        phrase in message
-                        for phrase in (
-                            "duplicate column name",
-                            "already exists",
-                            'column "first_blood" of relation "submissions" already exists',
-                        )
-                    ):
-                        raise
+                await _ensure_first_blood_column(conn)
                 await _ensure_user_profile_columns(conn)
         except (OperationalError, DBAPIError, OSError) as exc:  # pragma: no cover - depends on timing
             if attempt >= max_attempts:
@@ -195,6 +173,9 @@ async def on_startup():
                     )
                     await database.engine.dispose()
                     database.configure_engine(database.DEFAULT_SQLITE_URL)
+                    from app import database as _db  # local import to refresh globals
+                    global async_session
+                    async_session = _db.async_session
                     attempt = 0
                     continue
 
