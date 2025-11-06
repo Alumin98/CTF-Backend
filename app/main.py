@@ -10,7 +10,6 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 from app import database
-from app.database import async_session
 from app.services.container_service import get_container_service
 
 # ----- Load environment variables -----
@@ -173,9 +172,6 @@ async def on_startup():
                     )
                     await database.engine.dispose()
                     database.configure_engine(database.DEFAULT_SQLITE_URL)
-                    from app import database as _db  # local import to refresh globals
-                    global async_session
-                    async_session = _db.async_session
                     attempt = 0
                     continue
 
@@ -196,7 +192,7 @@ async def on_startup():
                 "CTF backend API started and database tables ensured (using %s).",
                 database.CURRENT_DATABASE_URL,
             )
-            await get_container_service().start_cleanup_task(async_session)
+            await get_container_service().start_cleanup_task(database.async_session)
             break
 
 # ----- Health check endpoint -----
