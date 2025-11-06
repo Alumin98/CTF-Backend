@@ -1,6 +1,9 @@
 import logging
+import os
 from datetime import timezone
 from typing import List, Optional
+from urllib.parse import urljoin
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -21,6 +24,14 @@ from app.services import get_attachment_storage
 
 admin = APIRouter(prefix="/admin/challenges", tags=["Admin: Challenges"])
 logger = logging.getLogger(__name__)
+
+
+def _attachment_url(challenge_id: int, attachment_id: int) -> str:
+    base = os.getenv("CHALLENGE_ACCESS_BASE_URL", "").strip()
+    path = f"/challenges/{challenge_id}/attachments/{attachment_id}"
+    if not base:
+        return path
+    return urljoin(base.rstrip("/") + "/", path.lstrip("/"))
 
 
 def _looks_like_hashed_flag(value: Optional[str]) -> bool:
@@ -84,7 +95,7 @@ def _to_admin_schema(ch: Challenge, solves: int) -> ChallengeAdmin:
             filename=a.filename,
             content_type=a.content_type,
             filesize=a.filesize,
-            url=f"/challenges/{ch.id}/attachments/{a.id}",
+            url=_attachment_url(ch.id, a.id),
         )
         for a in sorted(getattr(ch, "attachments", []) or [], key=lambda att: att.id)
     ]
@@ -196,7 +207,7 @@ async def upload_attachment_admin(
 
     storage = get_attachment_storage()
     original_name = file.filename or "attachment.bin"
-    result = await storage.save(file)
+    result = await storage.save(challenge_id, file)
     attachment = ChallengeAttachment(
         challenge_id=challenge_id,
         filename=original_name,
@@ -213,7 +224,7 @@ async def upload_attachment_admin(
         filename=attachment.filename,
         content_type=attachment.content_type,
         filesize=attachment.filesize,
-        url=f"/challenges/{challenge_id}/attachments/{attachment.id}",
+        url=_attachment_url(challenge_id, attachment.id),
     )
 
 

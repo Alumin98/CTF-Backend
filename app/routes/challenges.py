@@ -1,19 +1,22 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+import os
 from datetime import datetime, timezone
+from urllib.parse import urljoin
 
+from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth_token import get_current_user, require_admin
 from app.database import get_db
-from app.auth_token import require_admin
 from app.routes.auth import hash_flag
-
 from app.models.challenge import Challenge
+from app.models.challenge_attachment import ChallengeAttachment
 from app.models.challenge_instance import ChallengeInstance
-from app.models.submission import Submission
-from app.models.user import User
-from app.models.team import Team
 from app.models.hint import Hint
-
+from app.models.submission import Submission
+from app.models.team import Team
+from app.models.user import User
 from app.schemas import (
     AttachmentRead,
     ChallengeCreate,
@@ -21,14 +24,31 @@ from app.schemas import (
     ChallengePublic,
     HintRead,
 )
-from app.models.challenge_attachment import ChallengeAttachment
-from app.models.hint import Hint
+from app.services.container_service import get_container_service
 
 router = APIRouter()
 
-# If you have a real dependency, wire it in; otherwise keep it permissive.
-def get_current_user():
-    return None
+
+def _attachment_url(challenge_id: int, attachment_id: int) -> str:
+    base = os.getenv("CHALLENGE_ACCESS_BASE_URL", "").strip()
+    path = f"/challenges/{challenge_id}/attachments/{attachment_id}"
+    if not base:
+        return path
+    return urljoin(base.rstrip("/") + "/", path.lstrip("/"))
+
+_optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
+
+
+async def get_current_user_optional(
+    token: str | None = Depends(_optional_oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    if not token:
+        return None
+    try:
+        return await get_current_user(token=token, db=db)
+    except HTTPException:
+        return None
 
 
 def _attachment_to_schema(challenge_id: int, attachment: ChallengeAttachment) -> AttachmentRead:
@@ -36,7 +56,7 @@ def _attachment_to_schema(challenge_id: int, attachment: ChallengeAttachment) ->
         id=attachment.id,
         filename=attachment.filename,
         content_type=attachment.content_type,
-        url=f"/challenges/{challenge_id}/attachments/{attachment.id}",
+        url=_attachment_url(challenge_id, attachment.id),
         filesize=attachment.filesize,
     )
 
@@ -57,9 +77,15 @@ def _challenge_to_public(
 ) -> ChallengePublic:
     hints = sorted(getattr(challenge, "hints", []) or [], key=lambda h: getattr(h, "order_index", 0))
     attachments = getattr(challenge, "attachments", []) or []
+    service = get_container_service()
+    access_url = service.build_access_url(challenge=challenge, instance=instance)
     active_instance = None
     if instance is not None:
-        active_instance = ChallengeInstanceRead.model_validate(instance)
+        instance_access_url = access_url or service.build_access_url(
+            challenge=challenge, instance=instance
+        )
+        base = ChallengeInstanceRead.model_validate(instance)
+        active_instance = base.model_copy(update={"access_url": instance_access_url})
     return ChallengePublic(
         id=challenge.id,
         title=challenge.title,
@@ -78,6 +104,7 @@ def _challenge_to_public(
         hints=[_hint_to_schema(h) for h in hints],
         attachments=[_attachment_to_schema(challenge.id, att) for att in attachments],
         active_instance=active_instance,
+        access_url=access_url,
         solves_count=solves,
     )
 
@@ -89,15 +116,19 @@ def _as_aware(dt):
 
 
 def _select_display_instance(instance: ChallengeInstance) -> ChallengeInstance | None:
-    if instance.status == "stopped":
+    if instance.status not in ChallengeInstance.ACTIVE_STATUSES:
         return None
+
+    def _as_aware(dt):
+        if dt is None:
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
     instance.started_at = _as_aware(getattr(instance, "started_at", None))
     instance.expires_at = _as_aware(getattr(instance, "expires_at", None))
 
-    if instance.expires_at and instance.expires_at < datetime.now(timezone.utc):
+    if instance.is_expired():
         return None
-
     return instance
 
 
@@ -163,7 +194,7 @@ async def create_challenge(
 @router.get("/challenges/", response_model=list[ChallengePublic])
 async def list_challenges(
     db: AsyncSession = Depends(get_db),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     Return active challenges whose time window includes 'now'.

@@ -20,6 +20,7 @@ def _make_challenge() -> Challenge:
     challenge.created_at = datetime.now(timezone.utc)
     challenge.is_active = True
     challenge.is_private = False
+    challenge.service_url_path = "/challenge1/"
     return challenge
 
 
@@ -41,13 +42,15 @@ def test_challenge_to_public_includes_active_instance():
     assert result.active_instance is not None
     assert result.active_instance.status == "running"
     assert result.active_instance.container_id == "abc123"
+    assert result.active_instance.access_url == "/challenge1/"
+    assert result.access_url == "/challenge1/"
 
 
 def test_select_display_instance_filters_expired_and_stopped():
     active = ChallengeInstance(
         challenge_id=1,
         user_id=1,
-        status="pending",
+        status="running",
         started_at=datetime.utcnow(),
         expires_at=datetime.utcnow() + timedelta(minutes=10),
     )
