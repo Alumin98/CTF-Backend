@@ -22,9 +22,9 @@ services:
     image: postgres:13
     restart: always
     environment:
-      - POSTGRES_USER=ctf_user
-      - POSTGRES_PASSWORD=ctf_pass
-      - POSTGRES_DB=ctf_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=PostgresPassword
+      - POSTGRES_DB=railway
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ctf_user -d ctf_db"]
       interval: 5s
