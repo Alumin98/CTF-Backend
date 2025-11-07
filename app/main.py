@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
-from app import database
+import app.database as database
 from app.services.container_service import get_container_service
 
 # ----- Load environment variables -----
@@ -19,14 +19,6 @@ load_dotenv()
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
-
-# ----- Import models so metadata is complete for create_all -----
-from app.models import (  # noqa: F401 (imported for side effects)
-    user, role, team, team_member, category, challenge,
-    challenge_tag, event, hint, event_challenge,
-    submission, activity_log, admin_action, competition, achievement,
-    challenge_instance, challenge_attachment,
 )
 
 # ----- Routers -----
@@ -138,6 +130,8 @@ async def _ensure_user_profile_columns(conn):
 async def on_startup():
     """Ensure database connectivity with simple retry logic."""
 
+    print("Using DB:", database.CURRENT_DATABASE_URL)
+
     max_attempts = int(os.getenv("DB_INIT_MAX_ATTEMPTS", "10"))
     base_delay = float(os.getenv("DB_INIT_RETRY_SECONDS", "1.0"))
 
@@ -145,8 +139,8 @@ async def on_startup():
     while True:
         attempt += 1
         try:
+            await database.init_models()
             async with database.engine.begin() as conn:
-                await conn.run_sync(database.Base.metadata.create_all)
                 await _ensure_first_blood_column(conn)
                 await _ensure_user_profile_columns(conn)
         except (OperationalError, DBAPIError, OSError) as exc:  # pragma: no cover - depends on timing

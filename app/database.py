@@ -187,3 +187,16 @@ async def get_db():
 
     async with SessionLocal() as session:
         yield session
+
+
+async def init_models() -> None:
+    """
+    Import all model modules so they register with Base, then create tables.
+    Run this once on startup for an empty DB.
+    """
+
+    # Ensure SQLAlchemy knows about every mapped class
+    import app.models  # noqa: F401
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
