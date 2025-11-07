@@ -66,26 +66,6 @@ def test_database_url_prefers_database_url_env():
     assert resolved == _normalize_database_url(env["DATABASE_URL"])
 
 
-def test_database_url_applies_pgsslmode_when_missing_ssl_flag():
-    env = {
-        "DATABASE_URL": "postgresql://user:pass@db.example.com/app",
-        "PGSSLMODE": "require",
-    }
-    resolved = _database_url_from_env(env)
-    params = _query_params(resolved)
-    assert params["ssl"] == ["true"]
-
-
-def test_pgsslmode_does_not_override_existing_ssl_flag():
-    env = {
-        "DATABASE_URL": "postgresql://user:pass@db.example.com/app?sslmode=disable",
-        "PGSSLMODE": "require",
-    }
-    resolved = _database_url_from_env(env)
-    params = _query_params(resolved)
-    assert params["ssl"] == ["false"]
-
-
 def test_database_url_uses_railway_pg_vars():
     env = {
         "PGHOST": "railway.internal",

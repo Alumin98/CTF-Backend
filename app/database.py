@@ -109,31 +109,6 @@ def _railway_env_database_url(env: Mapping[str, str]) -> Optional[str]:
     )
 
 
-def _apply_pgsslmode(url: str, sslmode: Optional[str]) -> str:
-    """Overlay PGSSLMODE-derived SSL preferences onto a normalized URL."""
-
-    if not sslmode:
-        return url
-
-    try:
-        parsed = make_url(url)
-    except Exception:
-        return url
-
-    if parsed.drivername != "postgresql+asyncpg":
-        return url
-
-    query = dict(parsed.query)
-    if "ssl" in query:
-        return url
-
-    translated = _translate_sslmode(sslmode)
-    if translated is None:
-        return url
-
-    return str(parsed.set(query={**query, "ssl": translated}))
-
-
 def _database_url_from_env(env: Mapping[str, str]) -> Optional[str]:
     """Resolve the preferred database URL from environment variables."""
 
@@ -145,7 +120,7 @@ def _database_url_from_env(env: Mapping[str, str]) -> Optional[str]:
     for raw in candidates:
         normalized = _normalize_database_url(raw)
         if normalized:
-            return _apply_pgsslmode(normalized, env.get("PGSSLMODE"))
+            return normalized
 
     railway = _railway_env_database_url(env)
     if railway:
