@@ -16,6 +16,7 @@ from app.models.hint import Hint
 from app.models.challenge_tag import ChallengeTag
 from app.models.submission import Submission  # used to count solves
 from app.models.challenge_attachment import ChallengeAttachment
+from app.models.category import Category
 from app.routes.auth import hash_flag
 from app.schemas import (
     ChallengeCreate, ChallengeUpdate, ChallengeAdmin, HintCreate, AttachmentRead
@@ -76,6 +77,22 @@ def _is_admin(user: User) -> bool:
 
     return False
 
+
+async def _ensure_category_exists(db: AsyncSession, category_id: Optional[int]) -> None:
+    """Verify that the referenced category exists when the session supports it."""
+
+    if category_id is None:
+        return
+
+    getter = getattr(db, "get", None)
+    if getter is None:
+        return
+
+    category = await getter(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=400, detail="Category not found")
+
+
 async def require_admin(user: User = Depends(get_current_user)) -> User:
     if not _is_admin(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
@@ -125,6 +142,8 @@ async def create_challenge(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin),
 ):
+    await _ensure_category_exists(db, payload.category_id)
+
     ch = Challenge(
         title=payload.title,
         description=payload.description,
@@ -253,6 +272,9 @@ async def update_challenge_admin(
     ch = await db.get(Challenge, challenge_id)
     if not ch:
         raise HTTPException(404, "Challenge not found")
+
+    if payload.category_id is not None:
+        await _ensure_category_exists(db, payload.category_id)
 
     # scalar fields
     for field in [
