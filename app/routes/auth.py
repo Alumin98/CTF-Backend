@@ -5,6 +5,7 @@ import os
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -30,6 +31,10 @@ async def register(user: UserRegister, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == user.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already exists")
+
+    result = await db.execute(select(User).where(User.username == user.username))
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Username already exists")
     
     if len(user.password) < 8:
         raise HTTPException(status_code=400, detail="Password too short")
@@ -49,7 +54,14 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(User).where(User.email == form_data.username))
+    result = await db.execute(
+        select(User).where(
+            or_(
+                User.email == form_data.username,
+                User.username == form_data.username,
+            )
+        )
+    )
     db_user = result.scalar_one_or_none()
 
     if not db_user or not pwd_context.verify(form_data.password, db_user.password_hash):
