@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 if "aiosqlite" not in sys.modules:
@@ -30,8 +32,8 @@ if "aiosqlite" not in sys.modules:
     stub.Warning = getattr(_sqlite3, "Warning", Exception)
     sys.modules["aiosqlite"] = stub
 
-from fastapi import BackgroundTasks
-from sqlalchemy import create_engine, select
+from fastapi import BackgroundTasks, HTTPException
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -148,3 +150,38 @@ async def _run_password_reset_flow():
 
 def test_password_reset_allows_login():
     asyncio.run(_run_password_reset_flow())
+
+
+async def _run_duplicate_username_registration():
+    engine, session_factory = create_session_factory()
+
+    try:
+        await call_with_session(
+            session_factory,
+            register,
+            UserRegister(
+                username="testuser",
+                email="user@example.com",
+                password="initialPass1",
+            ),
+        )
+
+        with pytest.raises(HTTPException) as excinfo:
+            await call_with_session(
+                session_factory,
+                register,
+                UserRegister(
+                    username="testuser",
+                    email="another@example.com",
+                    password="anotherPass2",
+                ),
+            )
+
+        assert excinfo.value.status_code == 400
+        assert excinfo.value.detail == "Username already exists"
+    finally:
+        engine.dispose()
+
+
+def test_register_rejects_duplicate_username():
+    asyncio.run(_run_duplicate_username_registration())
