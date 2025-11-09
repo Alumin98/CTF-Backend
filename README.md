@@ -9,6 +9,7 @@ docker compose up --build
 - API: http://localhost:8000
 - Docs: http://localhost:8000/docs
 - Hot reload is enabled on the backend container; edits to the source code refresh automatically.
+- A file-based SQLite database (`test.db`) is created inside the mounted source tree.
 
 ### Troubleshooting Docker on Windows (VS Code)
 If you see an error such as `unable to get image 'ctf-backend-backend'` or Docker complains about
@@ -23,7 +24,7 @@ If you see an error such as `unable to get image 'ctf-backend-backend'` or Docke
    ```powershell
    docker compose up --build
    ```
-   The compose stack now waits for Postgres to report healthy before starting the API.
+   The stack now starts the FastAPI container immediately because it no longer waits for Postgres health checks.
 4. **Still stuck?** Use `docker info` to confirm the client can reach the daemon. If that command fails,
    reboot Docker Desktop or your machine so the named pipe `//./pipe/dockerDesktopLinuxEngine` is created.
 
@@ -31,31 +32,24 @@ If you see an error such as `unable to get image 'ctf-backend-backend'` or Docke
 | Service     | Purpose    | Port |
 |-------------|------------|------|
 | backend     | FastAPI    | 8000 |
-| db          | PostgreSQL | 5432 |
+| nginx       | Reverse proxy | 80 |
 
-To experiment with containerised challenges, add a folder such as `challenges/challenge1`
-and start compose with the `challenges` profile:
-```powershell
-docker compose --profile challenges up --build
-```
-If no challenge containers are present you can ignore that profile; the core stack
-(`backend`, `db`, `nginx`) will run without it.
+Optional challenge containers can be enabled with the `challenges` profile. See the inline examples in
+`docker-compose.yml` for details.
 
 ## Environment
 `.env.docker` is loaded into the backend container.
 ```
-DATABASE_URL=postgresql://postgres:crDJrMIjfkHEZDuElDBFMIduQtsHAksF@nozomi.proxy.rlwy.net:38969/railway
+# Environment variables loaded into the backend container when using docker-compose.
+# The application now defaults to a SQLite database stored at /app/test.db, so no
+# DATABASE_URL override is required.
 JWT_SECRET=supersecretfortheCTF
 JWT_ALGORITHM=HS256
 JWT_EXPIRY_MINUTES=60
 ```
 
-> **Note**
-> The backend normalises `postgresql://` URLs to `postgresql+asyncpg://` automatically, so the
-> Railway connection string above works out of the box. If you prefer to run against the bundled
-> Postgres container instead, replace the value with
-> `postgresql+asyncpg://ctf_user:ctf_pass@db:5432/ctf_db` and run `docker compose down -v` before
-> restarting so a fresh local database is created.
+Set `DATABASE_URL` if you want to point the API at an external database. PostgreSQL URLs are automatically
+normalised to the async driver (`postgresql+asyncpg://`) if needed.
 
 You can tweak database boot timing with optional overrides:
 
@@ -65,22 +59,20 @@ DB_INIT_RETRY_SECONDS=1.0    # base delay (seconds) between retries; doubles eac
 ```
 
 ### Running without Docker
-If you prefer to launch the API directly with `uvicorn`, make sure a PostgreSQL
-instance is already accepting connections on the URL defined in `DATABASE_URL`.
-For local testing you can run just the database service from compose:
+If you prefer to launch the API directly with `uvicorn`, the application will default to the same
+file-based SQLite database used in Docker:
 
 ```powershell
-# start postgres only
-docker compose up db
-
-# in a separate terminal set DATABASE_URL accordingly and start uvicorn
-$Env:DATABASE_URL = "postgresql+asyncpg://ctf_user:ctf_pass@localhost:5432/ctf_db"
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Alternatively, point `DATABASE_URL` to an existing PostgreSQL deployment. The
-application will keep retrying the connection during startup but will now fail
-hard if the database remains unreachable, matching production expectations.
+To use PostgreSQL (or any other SQLAlchemy-supported database) instead, set `DATABASE_URL` before starting
+Uvicorn. For example, to target a local Postgres instance:
+
+```powershell
+$Env:DATABASE_URL = "postgresql+asyncpg://postgres:password@localhost:5432/ctf"
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
 ## Auth Flow Examples
 ```bash
@@ -95,11 +87,11 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/teams
 ```
 
 ## Key Endpoints
-- `POST /auth/register` → create user  
-- `POST /auth/login` → JWT token  
-- `GET /teams` / `POST /teams` → list/create teams (auth)  
-- `GET /challenges` → list challenges (auth)  
-- `POST /submissions` → submit flag (auth)  
+- `POST /auth/register` → create user
+- `POST /auth/login` → JWT token
+- `GET /teams` / `POST /teams` → list/create teams (auth)
+- `GET /challenges` → list challenges (auth)
+- `POST /submissions` → submit flag (auth)
 (See full reference at `/docs`.)
 
 ## Useful Docker Commands
@@ -107,8 +99,8 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/teams
 # Rebuild backend after changing dependencies
 docker compose build backend
 
-# Stop & wipe DB volumes
-docker compose down -v
+# Stop & remove running containers
+docker compose down
 
 # Shell into backend container
 docker compose exec backend /bin/bash
