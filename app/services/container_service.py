@@ -256,7 +256,11 @@ class ContainerService:
                 netloc = f"{host}:{port}"
             elif self._base_port and host == (self._base_host or host):
                 netloc = f"{host}:{self._base_port}"
-            return urlunparse((scheme, netloc, "/", "", ""))
+            # urllib.parse.urlunparse expects (scheme, netloc, path, params, query, fragment).
+            # Passing only five components raises ValueError and prevents returning the
+            # container access URL. Provide the full tuple even when params/query/fragment
+            # are empty so dynamic instance launches succeed.
+            return urlunparse((scheme, netloc, "/", "", "", ""))
 
         if self._base_url:
             return self._base_url
