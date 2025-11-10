@@ -9,8 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
-from app import database
-from app.database import async_session
+import app.database as database
 from app.services.container_service import get_container_service
 
 # ----- Load environment variables -----
@@ -22,14 +21,6 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 
-# ----- Import models so metadata is complete for create_all -----
-from app.models import (  # noqa: F401 (imported for side effects)
-    user, role, team, team_member, category, challenge,
-    challenge_tag, event, hint, event_challenge,
-    submission, activity_log, admin_action, competition, achievement,
-    challenge_instance, challenge_attachment,
-)
-
 # ----- Routers -----
 from app.routes.auth import router as auth_router
 from app.routes.teams import router as team_router
@@ -37,6 +28,7 @@ from app.routes.challenges import router as challenge_router         # public ch
 from app.routes.challenge_instances import router as instance_router
 from app.routes.attachments import router as attachments_router
 from app.routes.admin_challenges import admin as admin_chal_router   # NEW: admin challenges
+from app.routes import admin_categories
 from app.routes.submissions import router as submission_router
 from app.routes import competition as competition_routes
 from app.routes.password_reset import router as password_reset_router
@@ -74,6 +66,7 @@ app.include_router(challenge_router)       # /challenges ...
 app.include_router(instance_router)
 app.include_router(attachments_router)
 app.include_router(admin_chal_router)
+app.include_router(admin_categories.router)
 app.include_router(submission_router)
 app.include_router(competition_routes.router)
 app.include_router(password_reset_router)
@@ -135,35 +128,66 @@ async def _ensure_user_profile_columns(conn):
                 raise
 
 
+async def _ensure_hint_order_index_column(conn):
+    if conn.dialect.name == "sqlite":
+        ddl = "ALTER TABLE hints ADD COLUMN order_index INTEGER NOT NULL DEFAULT 0"
+    else:
+        ddl = (
+            "ALTER TABLE hints ADD COLUMN IF NOT EXISTS order_index "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
+
+    try:
+        await conn.execute(text(ddl))
+    except DBAPIError as ddl_error:
+        message = str(getattr(ddl_error, "orig", ddl_error)).lower()
+        if not any(
+            phrase in message
+            for phrase in (
+                "duplicate column name",
+                "already exists",
+                'column "order_index" of relation "hints" already exists',
+            )
+        ):
+            raise
+
+
 @app.on_event("startup")
 async def on_startup():
     """Ensure database connectivity with simple retry logic."""
+
+    print("Using DB:", database.CURRENT_DATABASE_URL)
 
     max_attempts = int(os.getenv("DB_INIT_MAX_ATTEMPTS", "10"))
     base_delay = float(os.getenv("DB_INIT_RETRY_SECONDS", "1.0"))
 
     attempt = 0
+
+    def sqlite_fallback_allowed() -> bool:
+        """Decide if we may fall back to the bundled SQLite database."""
+
+        configured = os.getenv("DB_ALLOW_SQLITE_FALLBACK")
+        if configured is not None:
+            return configured.lower() in {"1", "true", "yes", "on"}
+
+        # By default we only allow fallback when the app is already configured
+        # to use the bundled SQLite database (e.g. local development without a
+        # DATABASE_URL). In all other situations it's safer to fail fast so
+        # that deployment misconfigurations don't go unnoticed.
+        return database.CURRENT_DATABASE_URL == database.DEFAULT_SQLITE_URL
     while True:
         attempt += 1
         try:
+            await database.init_models()
             async with database.engine.begin() as conn:
-                await conn.run_sync(database.Base.metadata.create_all)
                 await _ensure_first_blood_column(conn)
                 await _ensure_user_profile_columns(conn)
+                await _ensure_hint_order_index_column(conn)
         except (OperationalError, DBAPIError, OSError) as exc:  # pragma: no cover - depends on timing
             if attempt >= max_attempts:
-                allow_sqlite_fallback = os.getenv("DB_ALLOW_SQLITE_FALLBACK", "1").lower() in {
-                    "1",
-                    "true",
-                    "yes",
-                    "on",
-                }
-
-                using_sqlite_already = (
-                    database.CURRENT_DATABASE_URL == database.DEFAULT_SQLITE_URL
-                )
-
-                if allow_sqlite_fallback and not using_sqlite_already:
+                if sqlite_fallback_allowed() and (
+                    database.CURRENT_DATABASE_URL != database.DEFAULT_SQLITE_URL
+                ):
                     logging.error(
                         "Database not reachable at %s after %s attempts: %s."
                         " Falling back to local SQLite for development.",
@@ -173,9 +197,6 @@ async def on_startup():
                     )
                     await database.engine.dispose()
                     database.configure_engine(database.DEFAULT_SQLITE_URL)
-                    from app import database as _db  # local import to refresh globals
-                    global async_session
-                    async_session = _db.async_session
                     attempt = 0
                     continue
 
@@ -196,7 +217,7 @@ async def on_startup():
                 "CTF backend API started and database tables ensured (using %s).",
                 database.CURRENT_DATABASE_URL,
             )
-            await get_container_service().start_cleanup_task(async_session)
+            await get_container_service().start_cleanup_task(database.async_session)
             break
 
 # ----- Health check endpoint -----
