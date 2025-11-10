@@ -247,20 +247,30 @@ class ContainerService:
             binding = ports[0]
             host = binding.get("host") or info.get("host") or self._base_host or "localhost"
             host = host if host not in {"0.0.0.0", ""} else (self._base_host or "localhost")
-            port = binding.get("host_port") or binding.get("port")
             scheme = self._base_scheme or "http"
             if self._base_host and host == "localhost":
                 host = self._base_host
-            netloc = host
-            if port:
-                netloc = f"{host}:{port}"
-            elif self._base_port and host == (self._base_host or host):
-                netloc = f"{host}:{self._base_port}"
-            return urlunparse((scheme, netloc, "/", "", ""))
+            port = binding.get("host_port") or binding.get("port")
+            effective_port = port
+            if not effective_port and self._base_port and host == (self._base_host or host):
+                effective_port = self._base_port
+            return self._compose_url(scheme=scheme, host=host, port=effective_port)
 
         if self._base_url:
             return self._base_url
         return None
+
+    @staticmethod
+    def _compose_url(*, scheme: str, host: str, port: Optional[int | str] = None, path: str = "/") -> str:
+        """Assemble a full URL using urllib.urlunparse without tuple length mistakes."""
+
+        clean_path = path if path.startswith("/") else f"/{path}"
+        host = host or "localhost"
+        if port:
+            netloc = f"{host}:{port}"
+        else:
+            netloc = host
+        return urlunparse((scheme, netloc, clean_path, "", "", ""))
 
     # ------------------------------------------------------------------
     # Docker helpers
