@@ -81,6 +81,58 @@ class ContainerService:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+    async def runner_health(self) -> dict[str, Any]:
+        """Report the health of the configured challenge runner."""
+
+        status: dict[str, Any] = {"runner": self.runner}
+
+        if self.runner == "kubernetes":
+            status.update(
+                {
+                    "status": "unavailable",
+                    "reason": "Kubernetes runner is not implemented",
+                }
+            )
+            return status
+
+        if self.runner not in {"local", "docker", "remote-docker"}:
+            status.update(
+                {
+                    "status": "error",
+                    "reason": f"Unsupported challenge runner '{self.runner}'",
+                }
+            )
+            return status
+
+        if docker is None:
+            status.update(
+                {
+                    "status": "unavailable",
+                    "reason": "Docker SDK is not installed",
+                }
+            )
+            return status
+
+        try:
+            client = await asyncio.to_thread(self._create_docker_client)
+        except Exception as exc:  # pragma: no cover - depends on docker availability
+            status.update({"status": "error", "reason": str(exc)})
+            return status
+
+        try:
+            await asyncio.to_thread(client.ping)
+        except Exception as exc:  # pragma: no cover - depends on docker availability
+            status.update({"status": "error", "reason": str(exc)})
+        else:
+            status.update({"status": "ok"})
+        finally:
+            try:  # pragma: no cover - best effort cleanup
+                await asyncio.to_thread(client.close)
+            except Exception:
+                pass
+
+        return status
+
     async def start_instance(
         self,
         db: AsyncSession,
