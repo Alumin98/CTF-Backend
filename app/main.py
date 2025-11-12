@@ -6,13 +6,11 @@ from dotenv import load_dotenv  # load .env variables
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 import app.database as database
 from app.services.container_service import get_container_service
-from app.models.challenge import Challenge, DeploymentType
-
 # ----- Load environment variables -----
 load_dotenv()
 
@@ -155,6 +153,68 @@ async def _ensure_hint_order_index_column(conn):
             raise
 
 
+async def _ensure_challenge_deployment_columns(conn):
+    statements = []
+    if conn.dialect.name == "sqlite":
+        statements.append(
+            "ALTER TABLE challenges ADD COLUMN deployment_type TEXT DEFAULT 'dynamic_container'"
+        )
+        statements.append("ALTER TABLE challenges ADD COLUMN service_port INTEGER")
+        statements.append("ALTER TABLE challenges ADD COLUMN always_on BOOLEAN NOT NULL DEFAULT 0")
+    else:
+        statements.append(
+            "ALTER TABLE challenges ADD COLUMN IF NOT EXISTS deployment_type "
+            "VARCHAR(32) NOT NULL DEFAULT 'dynamic_container'"
+        )
+        statements.append(
+            "ALTER TABLE challenges ADD COLUMN IF NOT EXISTS service_port INTEGER"
+        )
+        statements.append(
+            "ALTER TABLE challenges ADD COLUMN IF NOT EXISTS always_on "
+            "BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+
+    for ddl in statements:
+        try:
+            await conn.execute(text(ddl))
+        except DBAPIError as ddl_error:
+            message = str(getattr(ddl_error, "orig", ddl_error)).lower()
+            if not any(
+                phrase in message
+                for phrase in (
+                    "duplicate column name",
+                    "already exists",
+                    'column "deployment_type" of relation "challenges" already exists',
+                    'column "service_port" of relation "challenges" already exists',
+                    'column "always_on" of relation "challenges" already exists',
+                )
+            ):
+                raise
+
+    await conn.execute(
+        text(
+            "UPDATE challenges SET deployment_type = 'dynamic_container' "
+            "WHERE deployment_type IS NULL"
+        )
+    )
+
+
+async def _ensure_instance_user_nullable(conn):
+    if conn.dialect.name == "sqlite":
+        return
+
+    ddl = text("ALTER TABLE challenge_instances ALTER COLUMN user_id DROP NOT NULL")
+    try:
+        await conn.execute(ddl)
+    except DBAPIError as ddl_error:
+        message = str(getattr(ddl_error, "orig", ddl_error)).lower()
+        if "does not exist" in message or "already" in message:
+            return
+        if "not null" in message:
+            return
+        raise
+
+
 @app.on_event("startup")
 async def on_startup():
     """Ensure database connectivity with simple retry logic."""
@@ -186,6 +246,8 @@ async def on_startup():
                 await _ensure_first_blood_column(conn)
                 await _ensure_user_profile_columns(conn)
                 await _ensure_hint_order_index_column(conn)
+                await _ensure_challenge_deployment_columns(conn)
+                await _ensure_instance_user_nullable(conn)
         except (OperationalError, DBAPIError, OSError) as exc:  # pragma: no cover - depends on timing
             if attempt >= max_attempts:
                 if sqlite_fallback_allowed() and (
