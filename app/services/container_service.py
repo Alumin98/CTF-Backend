@@ -314,69 +314,31 @@ class ContainerService:
         if ports:
             binding = ports[0]
             host = binding.get("host") or info.get("host") or self._base_host or "localhost"
+            host = host if host not in {"0.0.0.0", ""} else (self._base_host or "localhost")
+            scheme = self._base_scheme or "http"
+            if self._base_host and host == "localhost":
+                host = self._base_host
             port = binding.get("host_port") or binding.get("port")
-            return self._compose_url(host=host, port=port, path="/")
+            effective_port = port
+            if not effective_port and self._base_port and host == (self._base_host or host):
+                effective_port = self._base_port
+            return self._compose_url(scheme=scheme, host=host, port=effective_port)
 
         if self._base_url:
             return self._base_url
         return None
 
-    def _compose_url(self, *, host: Optional[str], port: Optional[str], path: str) -> str:
-        host = (host or self._base_host or "localhost").strip()
-        if host in {"0.0.0.0", ""}:
-            host = self._base_host or "localhost"
-        scheme = self._base_scheme or "http"
-        normalized_path = path or "/"
-        if not normalized_path.startswith("/"):
-            normalized_path = f"/{normalized_path}"
-        netloc = host
+    @staticmethod
+    def _compose_url(*, scheme: str, host: str, port: Optional[int | str] = None, path: str = "/") -> str:
+        """Assemble a full URL using urllib.urlunparse without tuple length mistakes."""
+
+        clean_path = path if path.startswith("/") else f"/{path}"
+        host = host or "localhost"
         if port:
             netloc = f"{host}:{port}"
-        elif self._base_port and host == (self._base_host or host):
-            netloc = f"{host}:{self._base_port}"
-        return urlunparse((scheme, netloc, normalized_path, "", "", ""))
-
-    # ------------------------------------------------------------------
-    # Runner helpers
-    # ------------------------------------------------------------------
-    async def runner_health(self) -> dict[str, str]:
-        runner = self.runner or "local"
-        if runner in {"local", "docker", "remote-docker"}:
-            if docker is None:
-                return {
-                    "status": "unavailable",
-                    "runner": runner,
-                    "detail": "Docker SDK is not installed",
-                }
-            try:
-                client = await asyncio.to_thread(self._create_docker_client)
-                await asyncio.to_thread(client.ping)
-            except Exception as exc:  # pragma: no cover - runtime dependent
-                return {
-                    "status": "unavailable",
-                    "runner": runner,
-                    "detail": str(exc),
-                }
-            finally:  # pragma: no cover - best effort cleanup
-                try:
-                    if "client" in locals():
-                        await asyncio.to_thread(client.close)
-                except Exception:
-                    pass
-            return {
-                "status": "ok",
-                "runner": runner,
-                "detail": "Docker daemon reachable",
-            }
-
-        if runner == "kubernetes":
-            return {
-                "status": "unavailable",
-                "runner": runner,
-                "detail": "Kubernetes runner not implemented yet",
-            }
-
-        return {"status": "unknown", "runner": runner, "detail": "Unknown runner"}
+        else:
+            netloc = host
+        return urlunparse((scheme, netloc, clean_path, "", "", ""))
 
     # ------------------------------------------------------------------
     # Docker helpers
