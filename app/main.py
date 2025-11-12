@@ -6,11 +6,12 @@ from dotenv import load_dotenv  # load .env variables
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 import app.database as database
 from app.services.container_service import get_container_service
+from app.models.challenge import Challenge, DeploymentType
 
 # ----- Load environment variables -----
 load_dotenv()
@@ -33,6 +34,7 @@ from app.routes.submissions import router as submission_router
 from app.routes import competition as competition_routes
 from app.routes.password_reset import router as password_reset_router
 from app.routes.scoreboard import router as scoreboard_router
+from app.routes.runner_health import router as runner_health_router
 
 # ----- FastAPI app -----
 app = FastAPI(
@@ -71,6 +73,7 @@ app.include_router(submission_router)
 app.include_router(competition_routes.router)
 app.include_router(password_reset_router)
 app.include_router(scoreboard_router)
+app.include_router(runner_health_router)
 
 # ----- Startup: ensure tables exist -----
 async def _ensure_first_blood_column(conn):

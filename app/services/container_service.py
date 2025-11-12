@@ -12,7 +12,7 @@ from urllib.parse import urljoin, urlparse, urlunparse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.challenge import Challenge
+from app.models.challenge import Challenge, DeploymentType
 from app.models.challenge_instance import ChallengeInstance
 from app.models.user import User
 
@@ -38,7 +38,7 @@ class InstanceNotAllowed(InstanceError):
 
 
 class InstanceLaunchError(InstanceError):
-    """Raised when Docker fails to provision an instance."""
+    """Raised when the runner fails to provision an instance."""
 
 
 @dataclass(slots=True)
@@ -48,7 +48,7 @@ class LaunchResult:
 
 
 class ContainerService:
-    """Provision and manage per-user Docker challenge instances."""
+    """Provision and manage challenge instances for different deployment modes."""
 
     def __init__(
         self,
@@ -56,6 +56,7 @@ class ContainerService:
         ttl_seconds: Optional[int] = None,
         cleanup_interval: Optional[int] = None,
         base_url: Optional[str] = None,
+        runner: Optional[str] = None,
     ) -> None:
         self.ttl_seconds = ttl_seconds or int(os.getenv("CHALLENGE_INSTANCE_TIMEOUT", "3600"))
         self.cleanup_interval = cleanup_interval or int(
@@ -75,6 +76,7 @@ class ContainerService:
         self._resolved_network: Optional[str] = None
         self._network_checked = False
         self._cleanup_task: Optional[asyncio.Task] = None
+        self.runner = (runner or os.getenv("CHALLENGE_RUNNER", "local")).strip().lower() or "local"
 
     # ------------------------------------------------------------------
     # Public API
@@ -86,7 +88,12 @@ class ContainerService:
         challenge: Challenge,
         user: User,
     ) -> ChallengeInstance:
-        """Start (or reuse) an active instance for the user."""
+        deployment = self._deployment_type(challenge)
+        if deployment == DeploymentType.static_attachment:
+            raise InstanceNotAllowed("Challenge serves static attachments only")
+
+        if deployment == DeploymentType.static_container:
+            return await self.ensure_static_instance(db, challenge=challenge)
 
         self._ensure_launchable(challenge)
 
@@ -104,7 +111,7 @@ class ContainerService:
 
         try:
             launch = await self._launch_container(challenge=challenge, instance=instance, user=user)
-        except Exception as exc:  # pragma: no cover - depends on docker availability
+        except Exception as exc:  # pragma: no cover - depends on runner availability
             message = str(exc)
             instance.mark_error(message)
             db.add(instance)
@@ -129,14 +136,50 @@ class ContainerService:
         await db.refresh(instance)
         return instance
 
+    async def ensure_static_instance(
+        self,
+        db: AsyncSession,
+        *,
+        challenge: Challenge,
+    ) -> ChallengeInstance:
+        self._ensure_launchable(challenge)
+        existing = await self.get_shared_instance(db, challenge_id=challenge.id)
+        if existing:
+            return existing
+
+        instance = ChallengeInstance(challenge_id=challenge.id, user_id=None)
+        instance.mark_starting()
+        db.add(instance)
+        await db.flush()
+        await db.refresh(instance)
+
+        try:
+            launch = await self._launch_container(challenge=challenge, instance=instance, user=None)
+        except Exception as exc:  # pragma: no cover - depends on runner availability
+            message = str(exc)
+            instance.mark_error(message)
+            db.add(instance)
+            await db.commit()
+            await db.refresh(instance)
+            raise InstanceLaunchError(message) from exc
+
+        instance.mark_running(
+            container_id=launch.container_id,
+            connection_info=launch.connection_info,
+            started_at=datetime.utcnow(),
+            expires_at=None,
+        )
+        db.add(instance)
+        await db.commit()
+        await db.refresh(instance)
+        return instance
+
     async def stop_instance(
         self,
         db: AsyncSession,
         *,
         instance: ChallengeInstance,
     ) -> ChallengeInstance:
-        """Stop the Docker container backing an instance."""
-
         if instance.status != "stopped":
             try:
                 await self._stop_container(instance.container_id)
@@ -160,6 +203,31 @@ class ContainerService:
             .where(
                 ChallengeInstance.challenge_id == challenge_id,
                 ChallengeInstance.user_id == user_id,
+                ChallengeInstance.status.in_(ChallengeInstance.ACTIVE_STATUSES),
+            )
+            .order_by(ChallengeInstance.created_at.desc())
+            .limit(1)
+        )
+        result = await db.execute(stmt)
+        instance = result.scalars().first()
+        if not instance:
+            return None
+        if instance.is_expired():
+            await self.stop_instance(db, instance=instance)
+            return None
+        return instance
+
+    async def get_shared_instance(
+        self,
+        db: AsyncSession,
+        *,
+        challenge_id: int,
+    ) -> Optional[ChallengeInstance]:
+        stmt = (
+            select(ChallengeInstance)
+            .where(
+                ChallengeInstance.challenge_id == challenge_id,
+                ChallengeInstance.user_id.is_(None),
                 ChallengeInstance.status.in_(ChallengeInstance.ACTIVE_STATUSES),
             )
             .order_by(ChallengeInstance.created_at.desc())
@@ -233,13 +301,13 @@ class ContainerService:
     ) -> Optional[str]:
         path = getattr(challenge, "service_url_path", None)
         if path:
-            path = path if path.startswith("/") else f"/{path}"
+            normalized = path if path.startswith("/") else f"/{path}"
             if self._base_url:
-                return urljoin(f"{self._base_url}/", path.lstrip("/"))
-            return path
+                return urljoin(f"{self._base_url}/", normalized.lstrip("/"))
+            return normalized
 
         if instance is None:
-            return None
+            return self._base_url or None
 
         info = instance.connection_info or {}
         ports = info.get("ports") or []
@@ -280,20 +348,30 @@ class ContainerService:
         *,
         challenge: Challenge,
         instance: ChallengeInstance,
-        user: User,
+        user: Optional[User],
     ) -> LaunchResult:
-        if docker is None:
-            raise RuntimeError("Docker SDK is not available. Install the 'docker' package to continue.")
+        deployment = self._deployment_type(challenge)
+        if deployment == DeploymentType.static_attachment:
+            raise InstanceNotAllowed("Challenge does not launch containers")
 
-        client = await asyncio.to_thread(docker.from_env)
+        if self.runner == "kubernetes":
+            return await self._launch_kubernetes(challenge=challenge, instance=instance, user=user)
+
+        if docker is None:
+            raise RuntimeError(
+                "Docker SDK is not available. Install the 'docker' package or switch the runner."
+            )
+
+        client = await asyncio.to_thread(self._create_docker_client)
         try:
             network = await self._resolve_network(client)
             labels = {
                 "ctf.challenge_id": str(challenge.id),
-                "ctf.user_id": str(user.id),
                 "ctf.instance_id": str(instance.id),
             }
-            name = f"ctf_{challenge.id}_{user.id}_{int(time.time())}"
+            if user is not None:
+                labels["ctf.user_id"] = str(user.id)
+            name = f"ctf_{challenge.id}_{instance.id}_{int(time.time())}"
 
             options: dict[str, Any] = {
                 "detach": True,
@@ -304,15 +382,11 @@ class ContainerService:
             if network:
                 options["network"] = network
 
-            service_path = getattr(challenge, "service_url_path", None)
-            if not service_path:
-                container_port = (
-                    getattr(challenge, "service_port", None)
-                    or getattr(challenge, "service_internal_port", None)
-                    or getattr(challenge, "internal_port", None)
-                    or 80
-                )
-                options["ports"] = {f"{container_port}/tcp": None}
+            container_port = await asyncio.to_thread(self._discover_image_port, client, challenge)
+            if container_port:
+                options.setdefault("ports", {f"{container_port}/tcp": None})
+            else:
+                options.setdefault("ports", {"80/tcp": None})
 
             container = await asyncio.to_thread(
                 client.containers.run,
@@ -325,13 +399,13 @@ class ContainerService:
             network_settings = info.get("NetworkSettings", {})
             ports_info = network_settings.get("Ports", {})
             mapped: list[dict[str, Any]] = []
-            for container_port, bindings in (ports_info or {}).items():
+            for container_port_key, bindings in (ports_info or {}).items():
                 if not bindings:
                     continue
                 for binding in bindings:
                     mapped.append(
                         {
-                            "container_port": container_port,
+                            "container_port": container_port_key,
                             "host": binding.get("HostIp") or self._base_host or "localhost",
                             "host_port": binding.get("HostPort"),
                         }
@@ -341,6 +415,7 @@ class ContainerService:
                 "host": self._base_host or "localhost",
                 "ports": mapped,
             }
+            service_path = getattr(challenge, "service_url_path", None)
             if service_path:
                 connection["path"] = service_path
             if network:
@@ -353,12 +428,105 @@ class ContainerService:
             except Exception:
                 pass
 
+    async def _launch_kubernetes(
+        self,
+        *,
+        challenge: Challenge,
+        instance: ChallengeInstance,
+        user: Optional[User],
+    ) -> LaunchResult:
+        raise InstanceLaunchError(
+            "Kubernetes runner is not implemented. Set CHALLENGE_RUNNER to 'local' or 'remote-docker'."
+        )
+
+    def _create_docker_client(self):
+        if docker is None:  # pragma: no cover - enforced earlier
+            raise RuntimeError("Docker SDK not available")
+
+        if self.runner in {"local", "docker"}:
+            return docker.from_env()
+
+        if self.runner == "remote-docker":
+            base_url = os.getenv("CHALLENGE_DOCKER_HOST")
+            if not base_url:
+                raise RuntimeError("CHALLENGE_DOCKER_HOST must be set for remote Docker runner")
+
+            tls_verify = os.getenv("CHALLENGE_DOCKER_TLS_VERIFY", "1").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            if tls_verify:
+                ca_cert = os.getenv("CHALLENGE_DOCKER_TLS_CA_CERT")
+                client_cert = os.getenv("CHALLENGE_DOCKER_TLS_CERT")
+                client_key = os.getenv("CHALLENGE_DOCKER_TLS_KEY")
+                tls_config = None
+                if client_cert and client_key:
+                    from docker import tls  # type: ignore
+
+                    tls_config = tls.TLSConfig(
+                        client_cert=(client_cert, client_key),
+                        ca_cert=ca_cert,
+                        verify=True,
+                    )
+                else:
+                    from docker import tls  # type: ignore
+
+                    tls_config = tls.TLSConfig(ca_cert=ca_cert, verify=True)
+                return docker.DockerClient(base_url=base_url, tls=tls_config)
+            return docker.DockerClient(base_url=base_url)
+
+        raise RuntimeError(f"Unsupported challenge runner '{self.runner}'")
+
+    def _coerce_port(self, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        try:
+            number = int(str(value).split("/")[0])
+        except (TypeError, ValueError):
+            return None
+        if number <= 0:
+            return None
+        return str(number)
+
+    def _discover_image_port(self, client, challenge) -> Optional[str]:
+        hints = [
+            getattr(challenge, "service_port", None),
+            getattr(challenge, "service_internal_port", None),
+            getattr(challenge, "internal_port", None),
+        ]
+        for hint in hints:
+            port = self._coerce_port(hint)
+            if port:
+                return port
+
+        image_name = getattr(challenge, "docker_image", None)
+        if not image_name:
+            return None
+
+        try:
+            image = client.images.get(image_name)
+        except Exception as exc:  # pragma: no cover - depends on docker availability
+            _LOGGER.warning("Unable to inspect image %s for exposed ports: %s", image_name, exc)
+            return None
+
+        attrs = getattr(image, "attrs", {}) or {}
+        for key in ("Config", "ContainerConfig"):
+            config = attrs.get(key) or {}
+            ports = config.get("ExposedPorts") or {}
+            for exposed in ports.keys():
+                port = self._coerce_port(exposed)
+                if port:
+                    return port
+        return None
+
     async def _stop_container(self, container_id: Optional[str]) -> None:
         if not container_id:
             return
         if docker is None:
             return
-        client = await asyncio.to_thread(docker.from_env)
+        client = await asyncio.to_thread(self._create_docker_client)
         try:
             try:
                 container = await asyncio.to_thread(client.containers.get, container_id)
@@ -394,9 +562,23 @@ class ContainerService:
     # ------------------------------------------------------------------
     # Validation helpers
     # ------------------------------------------------------------------
+    def _deployment_type(self, challenge: Challenge) -> DeploymentType:
+        deployment = getattr(challenge, "deployment_type", DeploymentType.dynamic_container)
+        if isinstance(deployment, str):
+            try:
+                deployment = DeploymentType(deployment)
+            except ValueError:
+                deployment = DeploymentType.dynamic_container
+        return deployment
+
     def _ensure_launchable(self, challenge: Challenge) -> None:
         if not challenge.is_active or getattr(challenge, "is_private", False):
             raise InstanceNotAllowed("Challenge is not active")
+
+        deployment = self._deployment_type(challenge)
+        if deployment == DeploymentType.static_attachment:
+            raise InstanceNotAllowed("Challenge serves static attachments only")
+
         if not challenge.docker_image:
             raise InstanceNotAllowed("Challenge does not have a docker image configured")
 

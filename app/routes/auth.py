@@ -1,5 +1,4 @@
 
-import hashlib
 import hmac
 import os
 
@@ -22,9 +21,6 @@ from app.schemas import (
 from app.security import pwd_context
 
 router = APIRouter()
-
-def hash_flag(flag: str) -> str:
-    return hashlib.sha256(flag.encode("utf-8")).hexdigest()
 
 @router.post("/register")
 async def register(user: UserRegister, db: AsyncSession = Depends(get_db)):

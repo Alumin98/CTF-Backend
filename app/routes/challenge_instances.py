@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth_token import get_current_user
 from app.database import get_db
-from app.models.challenge import Challenge
+from app.models.challenge import Challenge, DeploymentType
 from app.models.challenge_instance import ChallengeInstance
 from app.models.user import User
 from app.schemas import ChallengeInstanceRead
@@ -53,6 +53,16 @@ async def _latest_instance(db: AsyncSession, challenge_id: int, user_id: int) ->
     return result.scalars().first()
 
 
+def _deployment_type(challenge: Challenge) -> DeploymentType:
+    deployment = getattr(challenge, "deployment_type", DeploymentType.dynamic_container)
+    if isinstance(deployment, str):
+        try:
+            deployment = DeploymentType(deployment)
+        except ValueError:
+            deployment = DeploymentType.dynamic_container
+    return deployment
+
+
 @router.post("/start", response_model=ChallengeInstanceRead)
 async def start_instance(
     challenge_id: int,
@@ -66,8 +76,14 @@ async def start_instance(
         raise HTTPException(status_code=403, detail="Challenge not available")
 
     service = get_container_service()
+    deployment = _deployment_type(challenge)
+    if deployment == DeploymentType.static_attachment:
+        raise HTTPException(status_code=403, detail="Challenge does not expose a runtime instance")
     try:
-        instance = await service.start_instance(db, challenge=challenge, user=user)
+        if deployment == DeploymentType.static_container:
+            instance = await service.ensure_static_instance(db, challenge=challenge)
+        else:
+            instance = await service.start_instance(db, challenge=challenge, user=user)
     except InstanceNotAllowed as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except InstanceLaunchError as exc:
@@ -89,7 +105,16 @@ async def get_my_instance(
         raise HTTPException(status_code=404, detail="Challenge not available")
 
     service = get_container_service()
-    instance = await service.get_latest_active_instance(db, challenge_id=challenge_id, user_id=user.id)
+    deployment = _deployment_type(challenge)
+    if deployment == DeploymentType.static_attachment:
+        raise HTTPException(status_code=404, detail="No active instance")
+
+    if deployment == DeploymentType.static_container:
+        instance = await service.get_shared_instance(db, challenge_id=challenge_id)
+        if not instance and getattr(challenge, "always_on", False):
+            instance = await service.ensure_static_instance(db, challenge=challenge)
+    else:
+        instance = await service.get_latest_active_instance(db, challenge_id=challenge_id, user_id=user.id)
     if not instance:
         raise HTTPException(status_code=404, detail="No active instance")
 
@@ -105,6 +130,14 @@ async def stop_instance(
     user: User = Depends(get_current_user),
 ):
     service = get_container_service()
+    challenge = await db.get(Challenge, challenge_id)
+    if not challenge:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    deployment = _deployment_type(challenge)
+    if deployment == DeploymentType.static_container:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     instance = await service.get_latest_active_instance(db, challenge_id=challenge_id, user_id=user.id)
     if not instance:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
