@@ -3,7 +3,7 @@
 from datetime import datetime
 import hashlib
 import os
-from typing import Optional
+import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession

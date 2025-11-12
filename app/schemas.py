@@ -130,6 +130,28 @@ class ChallengeInstanceRead(BaseModel):
 
 
 # ---- Challenge base / create / update ----
+class CategoryBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class CategoryCreate(CategoryBase):
+    pass
+
+
+class CategoryUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class CategoryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: Optional[str] = None
+
+
 class ChallengeBase(BaseModel):
     title: str
     description: str
@@ -209,7 +231,8 @@ class ChallengePublic(BaseModel):
     attachments: List[AttachmentRead] = Field(default_factory=list)
     active_instance: Optional[ChallengeInstanceRead] = None
     access_url: Optional[str] = None
-    solves_count: int = 0  # filled in by routes from related tables
+    solves_count: int = 0
+    solves_count: int = 0  # fill in route from related table
 
 
 class ChallengeAdmin(BaseModel):

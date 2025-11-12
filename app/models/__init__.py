@@ -1,15 +1,20 @@
-from app.models.user import User
-from app.models.role import Role
-from app.models.team import Team
-from app.models.team_member import TeamMember
-from app.models.category import Category
-from app.models.challenge import Challenge
-from app.models.challenge_tag import ChallengeTag
-from app.models.event import Event
-from app.models.hint import Hint
-from app.models.event_challenge import EventChallenge
-from app.models.submission import Submission
-from app.models.activity_log import ActivityLog
-from app.models.admin_action import AdminAction
-from app.models.challenge_instance import ChallengeInstance
-from app.models.challenge_attachment import ChallengeAttachment
+"""Model package imports to register SQLAlchemy mappings."""
+
+# Importing registers models with SQLAlchemy's Base.metadata.
+from .activity_log import ActivityLog  # noqa: F401
+from .achievement import Achievement  # noqa: F401
+from .admin_action import AdminAction  # noqa: F401
+from .category import Category  # noqa: F401
+from .challenge import Challenge  # noqa: F401
+from .challenge_attachment import ChallengeAttachment  # noqa: F401
+from .challenge_instance import ChallengeInstance  # noqa: F401
+from .challenge_tag import ChallengeTag  # noqa: F401
+from .competition import Competition  # noqa: F401
+from .event import Event  # noqa: F401
+from .event_challenge import EventChallenge  # noqa: F401
+from .hint import Hint  # noqa: F401
+from .role import Role  # noqa: F401
+from .submission import Submission  # noqa: F401
+from .team import Team  # noqa: F401
+from .team_member import TeamMember  # noqa: F401
+from .user import User  # noqa: F401
