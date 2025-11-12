@@ -17,7 +17,7 @@ from app.models.challenge_tag import ChallengeTag
 from app.models.submission import Submission  # used to count solves
 from app.models.challenge_attachment import ChallengeAttachment
 from app.models.category import Category
-from app.routes.auth import hash_flag
+from app.flag_storage import hash_flag
 from app.schemas import (
     ChallengeCreate, ChallengeUpdate, ChallengeAdmin, HintCreate, AttachmentRead
 )
