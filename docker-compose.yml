@@ -6,32 +6,19 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     env_file:
       - .env.docker
+    environment:
+      - CHALLENGE_RUNNER=${CHALLENGE_RUNNER:-local}
+      - CHALLENGE_DOCKER_HOST=${CHALLENGE_DOCKER_HOST:-}
+      - CHALLENGE_DOCKER_TLS_VERIFY=${CHALLENGE_DOCKER_TLS_VERIFY:-}
+      - CHALLENGE_DOCKER_TLS_CA_CERT=${CHALLENGE_DOCKER_TLS_CA_CERT:-}
+      - CHALLENGE_DOCKER_TLS_CERT=${CHALLENGE_DOCKER_TLS_CERT:-}
+      - CHALLENGE_DOCKER_TLS_KEY=${CHALLENGE_DOCKER_TLS_KEY:-}
     volumes:
       - .:/app
       - /var/run/docker.sock:/var/run/docker.sock
       - ./storage:/app/storage
     ports:
       - "8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - ctf_net
-
-  db:
-    image: postgres:13
-    restart: always
-    environment:
-      - POSTGRES_USER=ctf_user
-      - POSTGRES_PASSWORD=ctf_pass
-      - POSTGRES_DB=ctf_db
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ctf_user -d ctf_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    volumes:
-      - db_data:/var/lib/postgresql/data
     networks:
       - ctf_net
 
@@ -64,9 +51,6 @@ services:
   #     - "9002:9000"
   #   networks:
   #     - ctf_net
-
-volumes:
-  db_data:
 
 networks:
   ctf_net:

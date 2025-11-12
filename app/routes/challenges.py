@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth_token import get_current_user, require_admin
 from app.database import get_db
-from app.routes.auth import hash_flag
-from app.models.challenge import Challenge
+from app.flag_storage import hash_flag
+from app.models.challenge import Challenge, DeploymentType
 from app.models.challenge_attachment import ChallengeAttachment
 from app.models.challenge_instance import ChallengeInstance
 from app.models.hint import Hint
@@ -22,6 +22,7 @@ from app.schemas import (
     ChallengeCreate,
     ChallengeInstanceRead,
     ChallengePublic,
+    HintCreate,
     HintRead,
 )
 from app.services.container_service import get_container_service
@@ -86,6 +87,12 @@ def _challenge_to_public(
         )
         base = ChallengeInstanceRead.model_validate(instance)
         active_instance = base.model_copy(update={"access_url": instance_access_url})
+    deployment_type = getattr(challenge, "deployment_type", DeploymentType.dynamic_container)
+    if isinstance(deployment_type, str):
+        try:
+            deployment_type = DeploymentType(deployment_type)
+        except ValueError:
+            deployment_type = DeploymentType.dynamic_container
     return ChallengePublic(
         id=challenge.id,
         title=challenge.title,
@@ -100,6 +107,9 @@ def _challenge_to_public(
         is_private=challenge.is_private,
         visible_from=getattr(challenge, "visible_from", None),
         visible_to=getattr(challenge, "visible_to", None),
+        deployment_type=deployment_type,
+        service_port=getattr(challenge, "service_port", None),
+        always_on=bool(getattr(challenge, "always_on", False)),
         tags=challenge.tag_strings,
         hints=[_hint_to_schema(h) for h in hints],
         attachments=[_attachment_to_schema(challenge.id, att) for att in attachments],
@@ -113,6 +123,12 @@ def _as_aware(dt):
     if dt is None:
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _as_naive(dt):
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is None else dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _select_display_instance(instance: ChallengeInstance) -> ChallengeInstance | None:
@@ -139,49 +155,32 @@ async def create_challenge(
     user=Depends(require_admin),
 ):
     try:
-        data = challenge.dict()
-
-        # Map fields + hash flag
-        data["flag"] = hash_flag(challenge.flag) if challenge.flag is not None else None
-        data["visible_from"] = data.pop("start_time", None)
-        data["visible_to"] = data.pop("end_time", None)
-
-        # Pull relationship inputs out BEFORE constructing the model
-        tags = data.pop("tags", None)
-        hints = data.pop("hints", None)
+        data = challenge.model_dump()
+        tags = data.pop("tags", [])
+        hints_payload = data.pop("hints", [])
+        flag_value = data.pop("flag")
+        data["flag"] = hash_flag(flag_value)
+        if data.get("visible_from") is not None:
+            data["visible_from"] = _as_naive(data["visible_from"])
+        if data.get("visible_to") is not None:
+            data["visible_to"] = _as_naive(data["visible_to"])
 
         new_ch = Challenge(**data)
 
-        # Apply hints
-        if hints:
-            for h in hints:
-                new_ch.hints.append(
-                    Hint(text=h["text"], penalty=h["penalty"], order_index=h["order_index"])
-                    if isinstance(h, dict)
-                    else Hint(text=h.text, penalty=h.penalty, order_index=h.order_index)
-                )
+        for hint in hints_payload:
+            if isinstance(hint, HintCreate):
+                hint_obj = hint
+            else:
+                hint_obj = HintCreate(**hint)
+            new_ch.hints.append(
+                Hint(text=hint_obj.text, penalty=hint_obj.penalty, order_index=hint_obj.order_index)
+            )
 
-        # Apply tags (if your model has this helper)
         if tags:
             new_ch.set_tag_strings(tags)
 
         db.add(new_ch)
         await db.commit()
-        await db.refresh(new_ch)
-
-        return ChallengePublic(
-            id=new_ch.id,
-            title=new_ch.title,
-            description=new_ch.description,
-            category_id=getattr(new_ch, "category_id", None),
-            points=new_ch.points,
-            difficulty=new_ch.difficulty,
-            is_active=new_ch.is_active,
-            start_time=new_ch.visible_from,
-            end_time=new_ch.visible_to,
-            created_at=getattr(new_ch, "created_at", None),
-            solves=0,
-        )
         await db.refresh(new_ch, attribute_names=["hints", "tags", "attachments"])
 
         return _challenge_to_public(new_ch)
@@ -205,6 +204,7 @@ async def list_challenges(
 
     now = datetime.now(timezone.utc)
 
+    service = get_container_service()
     instances_by_challenge: dict[int, ChallengeInstance] = {}
     if current_user:
         challenge_ids = [c.id for c in rows if getattr(c, "id", None) is not None]
@@ -225,6 +225,19 @@ async def list_challenges(
                 if display_instance:
                     instances_by_challenge[inst.challenge_id] = display_instance
 
+    shared_instances: dict[int, ChallengeInstance] = {}
+    for c in rows:
+        deployment = getattr(c, "deployment_type", DeploymentType.dynamic_container)
+        if isinstance(deployment, str):
+            try:
+                deployment = DeploymentType(deployment)
+            except ValueError:
+                deployment = DeploymentType.dynamic_container
+        if deployment == DeploymentType.static_container:
+            shared = await service.get_shared_instance(db, challenge_id=c.id)
+            if shared:
+                shared_instances[c.id] = shared
+
     visible: list[ChallengePublic] = []
     for c in rows:
         if not c.is_active:
@@ -238,12 +251,10 @@ async def list_challenges(
         if et and now > et:
             continue
 
-        visible.append(
-            _challenge_to_public(
-                c,
-                instance=instances_by_challenge.get(getattr(c, "id", None)),
-            )
-        )
+        instance = instances_by_challenge.get(getattr(c, "id", None))
+        if instance is None:
+            instance = shared_instances.get(getattr(c, "id", None))
+        visible.append(_challenge_to_public(c, instance=instance))
     return visible
 
 
@@ -266,8 +277,12 @@ async def update_challenge(
         challenge_update["visible_from"] = challenge_update.pop("start_time")
     if "end_time" in challenge_update:
         challenge_update["visible_to"] = challenge_update.pop("end_time")
+    if "deployment_type" in challenge_update and challenge_update["deployment_type"] is not None:
+        challenge_update["deployment_type"] = DeploymentType(challenge_update["deployment_type"])
 
     for k, v in challenge_update.items():
+        if k in {"visible_from", "visible_to"} and v is not None:
+            v = _as_naive(v)
         setattr(ch, k, v)
 
     await db.commit()

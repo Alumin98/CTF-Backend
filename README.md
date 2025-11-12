@@ -23,15 +23,14 @@ If you see an error such as `unable to get image 'ctf-backend-backend'` or Docke
    ```powershell
    docker compose up --build
    ```
-   The compose stack now waits for Postgres to report healthy before starting the API.
+   The compose stack now starts the API immediately because the default SQLite database lives inside the backend container.
 4. **Still stuck?** Use `docker info` to confirm the client can reach the daemon. If that command fails,
    reboot Docker Desktop or your machine so the named pipe `//./pipe/dockerDesktopLinuxEngine` is created.
 
 ## Services
-| Service     | Purpose    | Port |
-|-------------|------------|------|
-| backend     | FastAPI    | 8000 |
-| db          | PostgreSQL | 5432 |
+| Service | Purpose | Port |
+|---------|---------|------|
+| backend | FastAPI | 8000 |
 
 To experiment with containerised challenges, add a folder such as `challenges/challenge1`
 and start compose with the `challenges` profile:
@@ -39,23 +38,55 @@ and start compose with the `challenges` profile:
 docker compose --profile challenges up --build
 ```
 If no challenge containers are present you can ignore that profile; the core stack
-(`backend`, `db`, `nginx`) will run without it.
+(`backend`, `nginx`) will run without it.
 
 ## Environment
 `.env.docker` is loaded into the backend container.
 ```
-DATABASE_URL=postgresql://postgres:crDJrMIjfkHEZDuElDBFMIduQtsHAksF@nozomi.proxy.rlwy.net:38969/railway
+DATABASE_URL=sqlite+aiosqlite:///app/test.db
 JWT_SECRET=supersecretfortheCTF
 JWT_ALGORITHM=HS256
 JWT_EXPIRY_MINUTES=60
 ```
 
 > **Note**
-> The backend normalises `postgresql://` URLs to `postgresql+asyncpg://` automatically, so the
-> Railway connection string above works out of the box. If you prefer to run against the bundled
-> Postgres container instead, replace the value with
-> `postgresql+asyncpg://ctf_user:ctf_pass@db:5432/ctf_db` and run `docker compose down -v` before
-> restarting so a fresh local database is created.
+> The application defaults to a file-based SQLite database (`test.db`) that lives alongside the source tree.
+> If you supply a `DATABASE_URL` pointing at PostgreSQL (for example a Railway instance), the backend will automatically normalise `postgresql://` URLs to `postgresql+asyncpg://` so async drivers are used without extra configuration.
+
+### Selecting a challenge runner
+
+The backend can provision containers through different runners. Configure it with the `CHALLENGE_RUNNER`
+environment variable (defaults to `local`). Supported values:
+
+| Runner            | Description                                                                 |
+|-------------------|-----------------------------------------------------------------------------|
+| `local` (default) | Uses the Docker socket mounted from the host (Docker Desktop / compose).    |
+| `remote-docker`   | Connects to a remote Docker daemon over TCP/TLS. Provide `CHALLENGE_DOCKER_HOST` and optional TLS certs via `CHALLENGE_DOCKER_TLS_*`. |
+| `kubernetes`      | Reserved for future work; the API will report the runner as unavailable.    |
+
+When `remote-docker` is selected, set these additional variables (they can be placed in `.env.docker`):
+
+```
+CHALLENGE_DOCKER_HOST=tcp://1.2.3.4:2376
+CHALLENGE_DOCKER_TLS_VERIFY=1
+CHALLENGE_DOCKER_TLS_CA_CERT=/app/certs/ca.pem
+CHALLENGE_DOCKER_TLS_CERT=/app/certs/client-cert.pem
+CHALLENGE_DOCKER_TLS_KEY=/app/certs/client-key.pem
+```
+
+Mount the certificate directory into the backend container if needed. A new `/runner/health` endpoint
+exposes the runner status so you can verify connectivity from the FastAPI service.
+
+### Static vs. dynamic challenges
+
+Each challenge now declares a `deployment_type`:
+
+* `dynamic_container` – per-user containers with automatic TTL and cleanup.
+* `static_container` – a shared container instance. Mark `always_on=true` to keep it running from startup.
+* `static_attachment` – no runtime; players download the provided files.
+
+Static containers can be provisioned by the admin UI or automatically at startup when `always_on` is enabled.
+Use the `/runner/health` endpoint plus the admin challenge view to confirm shared instances are running.
 
 You can tweak database boot timing with optional overrides:
 
@@ -65,22 +96,13 @@ DB_INIT_RETRY_SECONDS=1.0    # base delay (seconds) between retries; doubles eac
 ```
 
 ### Running without Docker
-If you prefer to launch the API directly with `uvicorn`, make sure a PostgreSQL
-instance is already accepting connections on the URL defined in `DATABASE_URL`.
-For local testing you can run just the database service from compose:
+If you prefer to launch the API directly with `uvicorn`, you can rely on the default SQLite database:
 
 ```powershell
-# start postgres only
-docker compose up db
-
-# in a separate terminal set DATABASE_URL accordingly and start uvicorn
-$Env:DATABASE_URL = "postgresql+asyncpg://ctf_user:ctf_pass@localhost:5432/ctf_db"
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Alternatively, point `DATABASE_URL` to an existing PostgreSQL deployment. The
-application will keep retrying the connection during startup but will now fail
-hard if the database remains unreachable, matching production expectations.
+To use PostgreSQL instead, point `DATABASE_URL` at your instance before starting `uvicorn`. The app will keep retrying during startup and fall back to SQLite if you enable `DB_ALLOW_SQLITE_FALLBACK=1`.
 
 ## Auth Flow Examples
 ```bash
