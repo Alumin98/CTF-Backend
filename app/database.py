@@ -197,6 +197,8 @@ async def init_models() -> None:
 
     # Ensure SQLAlchemy knows about every mapped class
     import app.models  # noqa: F401
+    from app import schema_upgrades
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await schema_upgrades.run_post_creation_upgrades(conn)
