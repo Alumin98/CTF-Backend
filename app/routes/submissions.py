@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import Optional, Literal
 import os
+import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +11,8 @@ from sqlalchemy import select, func, desc, asc, cast, Boolean, insert
 
 from app.database import get_db
 from app.auth_token import get_current_user
-from app.routes.auth import hash_flag
+from app.flag_storage import verify_flag
+from app.rate_limiter import get_submission_rate_limiter
 
 from app.models.submission import Submission
 from app.models.challenge import Challenge
@@ -58,6 +60,10 @@ async def submit_flag(
     user=Depends(get_current_user),
 ):
     try:
+        limiter = get_submission_rate_limiter()
+        if limiter and not await limiter.try_acquire(f"user:{user.id}"):
+            raise HTTPException(status_code=429, detail="Too many submissions. Please slow down.")
+
         # 1) Challenge must exist
         ch_res = await db.execute(
             select(Challenge).where(Challenge.id == submission.challenge_id)
@@ -82,8 +88,8 @@ async def submit_flag(
             }
 
         # 3) Check flag
-        submitted_hash = hash_flag(submission.submitted_flag)
-        is_correct_bool = (submitted_hash == challenge.flag)
+        submitted_hash = hashlib.sha256(submission.submitted_flag.encode("utf-8")).hexdigest()
+        is_correct_bool = verify_flag(submission.submitted_flag, challenge.flag)
 
         # 4) First blood? (before inserting ours)
         fb_res = await db.execute(

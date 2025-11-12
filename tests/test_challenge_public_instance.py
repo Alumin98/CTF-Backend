@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from app.models.challenge import Challenge
+from app.models.challenge import Challenge, DeploymentType
 from app.models.challenge_instance import ChallengeInstance
 from app.routes.challenges import _challenge_to_public, _select_display_instance
 
@@ -21,6 +21,8 @@ def _make_challenge() -> Challenge:
     challenge.is_active = True
     challenge.is_private = False
     challenge.service_url_path = "/challenge1/"
+    challenge.deployment_type = DeploymentType.dynamic_container
+    challenge.always_on = False
     return challenge
 
 

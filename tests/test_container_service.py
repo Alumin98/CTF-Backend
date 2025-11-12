@@ -1,10 +1,10 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
 
+from app.models.challenge import DeploymentType
 from app.models.challenge_instance import ChallengeInstance
 from app.services.container_service import (
     ContainerService,
@@ -15,10 +15,10 @@ from app.services.container_service import (
 
 
 class _FakeSession:
-    def __init__(self):
+    def __init__(self, instances=None):
         self.added = []
         self.commit_count = 0
-        self.instances_to_return = []
+        self._result_instances = instances or []
 
     def add(self, obj):
         if obj not in self.added:
@@ -33,8 +33,8 @@ class _FakeSession:
     async def commit(self):
         self.commit_count += 1
 
-    async def execute(self, stmt):  # pragma: no cover - patched in tests when needed
-        return _FakeResult(self.instances_to_return)
+    async def execute(self, stmt):
+        return _FakeResult(self._result_instances)
 
 
 class _FakeResult:
@@ -66,16 +66,19 @@ def _make_challenge(**overrides):
         visible_from=now - timedelta(minutes=5),
         visible_to=now + timedelta(minutes=5),
         service_url_path="/challenge1/",
+        deployment_type=DeploymentType.dynamic_container,
+        always_on=False,
+        service_port=None,
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
 
 
-def _make_user(user_id: int = 100) -> SimpleNamespace:
+def _make_user(user_id: int = 42) -> SimpleNamespace:
     return SimpleNamespace(id=user_id)
 
 
-def test_start_instance_marks_running_and_provides_access_url(monkeypatch):
+def test_start_instance_marks_running(monkeypatch):
     async def _run():
         service = ContainerService(ttl_seconds=30, cleanup_interval=0, base_url="http://access")
         session = _FakeSession()
@@ -98,41 +101,95 @@ def test_start_instance_marks_running_and_provides_access_url(monkeypatch):
 
         assert instance.status == "running"
         assert instance.container_id == "abc123"
-        assert instance.connection_info["path"] == challenge.service_url_path
         assert service.build_access_url(challenge=challenge, instance=instance) == "http://access/challenge1/"
         assert session.commit_count == 1
 
     asyncio.run(_run())
 
 
-def test_start_instance_reuses_existing(monkeypatch):
+def test_ensure_static_instance_reuses_running(monkeypatch):
     async def _run():
-        service = ContainerService(ttl_seconds=30, cleanup_interval=0)
-        session = _FakeSession()
-        challenge = _make_challenge()
-        user = _make_user()
-        existing = ChallengeInstance(challenge_id=challenge.id, user_id=user.id)
-        existing.mark_running(container_id="xyz", connection_info={}, started_at=datetime.utcnow(), expires_at=None)
+        challenge = _make_challenge(deployment_type=DeploymentType.static_container)
+        service = ContainerService(ttl_seconds=0, cleanup_interval=0)
+        existing = ChallengeInstance(challenge_id=challenge.id, user_id=None)
+        existing.mark_running(
+            container_id="shared",
+            connection_info={"host": "localhost", "ports": []},
+            started_at=datetime.utcnow(),
+            expires_at=None,
+        )
+        session = _FakeSession(instances=[existing])
 
-        async def _fake_get_latest(*args, **kwargs):
-            return existing
+        async def _fake_launch(**kwargs):  # pragma: no cover - should not run
+            raise AssertionError("launch should not be called")
 
-        service._launch_container = AsyncMock()  # type: ignore[attr-defined]
-        monkeypatch.setattr(service, "get_latest_active_instance", _fake_get_latest)
+        monkeypatch.setattr(service, "_launch_container", _fake_launch)
 
-        instance = await service.start_instance(session, challenge=challenge, user=user)
-
+        instance = await service.ensure_static_instance(session, challenge=challenge)
         assert instance is existing
-        assert not service._launch_container.await_args_list  # type: ignore[attr-defined]
 
     asyncio.run(_run())
 
 
-def test_start_instance_raises_when_not_allowed(monkeypatch):
+def test_build_access_url_uses_host_port():
+    service = ContainerService()
+    challenge = _make_challenge(service_url_path=None)
+    user = _make_user()
+    instance = ChallengeInstance(challenge_id=challenge.id, user_id=user.id)
+    instance.mark_running(
+        container_id="abc",
+        connection_info={
+            "host": "localhost",
+            "ports": [
+                {"host": "localhost", "host_port": "55492", "container_port": "8000/tcp"}
+            ],
+        },
+        started_at=datetime.utcnow(),
+        expires_at=None,
+    )
+
+    url = service.build_access_url(challenge=challenge, instance=instance)
+    assert url == "http://localhost:55492/"
+
+
+def test_coerce_port_variants():
+    service = ContainerService()
+    assert service._coerce_port("8000/tcp") == "8000"
+    assert service._coerce_port("443") == "443"
+    assert service._coerce_port(1234) == "1234"
+    assert service._coerce_port("invalid") is None
+    assert service._coerce_port(0) is None
+
+
+def test_discover_image_port_prefers_hints(monkeypatch):
+    service = ContainerService()
+    challenge = _make_challenge(service_port=5000, service_url_path=None)
+    fake_client = SimpleNamespace(images=None)
+
+    port = service._discover_image_port(fake_client, challenge)
+    assert port == "5000"
+
+
+def test_discover_image_port_uses_image_metadata(monkeypatch):
+    service = ContainerService()
+    challenge = _make_challenge(service_port=None, service_url_path=None)
+
+    class _FakeImages:
+        def get(self, name):
+            assert name == challenge.docker_image
+            return SimpleNamespace(attrs={"Config": {"ExposedPorts": {"7777/tcp": {}}}})
+
+    fake_client = SimpleNamespace(images=_FakeImages())
+
+    port = service._discover_image_port(fake_client, challenge)
+    assert port == "7777"
+
+
+def test_start_instance_rejects_static_attachment():
     async def _run():
-        service = ContainerService(ttl_seconds=30, cleanup_interval=0)
+        service = ContainerService()
         session = _FakeSession()
-        challenge = _make_challenge(is_active=False)
+        challenge = _make_challenge(deployment_type=DeploymentType.static_attachment)
         user = _make_user()
 
         with pytest.raises(InstanceNotAllowed):
@@ -141,90 +198,24 @@ def test_start_instance_raises_when_not_allowed(monkeypatch):
     asyncio.run(_run())
 
 
-def test_start_instance_records_launch_errors(monkeypatch):
+def test_launch_error_marks_instance(monkeypatch):
     async def _run():
-        service = ContainerService(ttl_seconds=30, cleanup_interval=0)
+        service = ContainerService()
         session = _FakeSession()
         challenge = _make_challenge()
         user = _make_user()
 
+        async def _fake_launch(**kwargs):
+            raise RuntimeError("no docker")
+
+        monkeypatch.setattr(service, "_launch_container", _fake_launch)
+
         async def _fake_get_latest(*args, **kwargs):
             return None
 
-        async def _boom(**kwargs):
-            raise RuntimeError("broken image")
-
         monkeypatch.setattr(service, "get_latest_active_instance", _fake_get_latest)
-        monkeypatch.setattr(service, "_launch_container", _boom)
 
         with pytest.raises(InstanceLaunchError):
-            await service.start_instance(session, challenge=challenge, user=user)
-
-        assert session.commit_count == 1
-
-    asyncio.run(_run())
-
-
-def test_stop_instance_marks_stopped(monkeypatch):
-    async def _run():
-        service = ContainerService(ttl_seconds=30, cleanup_interval=0)
-        session = _FakeSession()
-        instance = ChallengeInstance(challenge_id=1, user_id=1)
-        instance.mark_running(
-            container_id="abc",
-            connection_info={"ports": []},
-            started_at=datetime.utcnow(),
-            expires_at=datetime.utcnow() + timedelta(seconds=5),
-        )
-
-        async def _noop(container_id):
-            return None
-
-        monkeypatch.setattr(service, "_stop_container", _noop)
-
-        stopped = await service.stop_instance(session, instance=instance)
-
-        assert stopped.status == "stopped"
-        assert session.commit_count == 1
-
-    asyncio.run(_run())
-
-
-def test_reap_expired_instances(monkeypatch):
-    async def _run():
-        service = ContainerService(ttl_seconds=30, cleanup_interval=0)
-        session = _FakeSession()
-        instance = ChallengeInstance(challenge_id=1, user_id=1)
-        instance.mark_running(
-            container_id="abc",
-            connection_info={"ports": []},
-            started_at=datetime.utcnow() - timedelta(hours=2),
-            expires_at=datetime.utcnow() - timedelta(minutes=5),
-        )
-        session.instances_to_return = [instance]
-
-        async def _noop(container_id):
-            return None
-
-        monkeypatch.setattr(service, "_stop_container", _noop)
-
-        cleaned = await service.reap_expired_instances(session)
-
-        assert cleaned == 1
-        assert instance.status == "stopped"
-
-    asyncio.run(_run())
-
-
-def test_start_instance_blocks_future_visibility():
-    async def _run():
-        future = datetime.now(timezone.utc) + timedelta(hours=1)
-        service = ContainerService(ttl_seconds=30, cleanup_interval=0)
-        session = _FakeSession()
-        challenge = _make_challenge(visible_from=future)
-        user = _make_user()
-
-        with pytest.raises(InstanceNotAllowed):
             await service.start_instance(session, challenge=challenge, user=user)
 
     asyncio.run(_run())

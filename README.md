@@ -57,6 +57,41 @@ JWT_EXPIRY_MINUTES=60
 > `postgresql+asyncpg://ctf_user:ctf_pass@db:5432/ctf_db` and run `docker compose down -v` before
 > restarting so a fresh local database is created.
 
+### Selecting a challenge runner
+
+The backend can provision containers through different runners. Configure it with the `CHALLENGE_RUNNER`
+environment variable (defaults to `local`). Supported values:
+
+| Runner            | Description                                                                 |
+|-------------------|-----------------------------------------------------------------------------|
+| `local` (default) | Uses the Docker socket mounted from the host (Docker Desktop / compose).    |
+| `remote-docker`   | Connects to a remote Docker daemon over TCP/TLS. Provide `CHALLENGE_DOCKER_HOST` and optional TLS certs via `CHALLENGE_DOCKER_TLS_*`. |
+| `kubernetes`      | Reserved for future work; the API will report the runner as unavailable.    |
+
+When `remote-docker` is selected, set these additional variables (they can be placed in `.env.docker`):
+
+```
+CHALLENGE_DOCKER_HOST=tcp://1.2.3.4:2376
+CHALLENGE_DOCKER_TLS_VERIFY=1
+CHALLENGE_DOCKER_TLS_CA_CERT=/app/certs/ca.pem
+CHALLENGE_DOCKER_TLS_CERT=/app/certs/client-cert.pem
+CHALLENGE_DOCKER_TLS_KEY=/app/certs/client-key.pem
+```
+
+Mount the certificate directory into the backend container if needed. A new `/runner/health` endpoint
+exposes the runner status so you can verify connectivity from the FastAPI service.
+
+### Static vs. dynamic challenges
+
+Each challenge now declares a `deployment_type`:
+
+* `dynamic_container` – per-user containers with automatic TTL and cleanup.
+* `static_container` – a shared container instance. Mark `always_on=true` to keep it running from startup.
+* `static_attachment` – no runtime; players download the provided files.
+
+Static containers can be provisioned by the admin UI or automatically at startup when `always_on` is enabled.
+Use the `/runner/health` endpoint plus the admin challenge view to confirm shared instances are running.
+
 You can tweak database boot timing with optional overrides:
 
 ```

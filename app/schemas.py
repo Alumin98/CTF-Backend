@@ -5,7 +5,9 @@
 from datetime import datetime
 from typing import Optional, List
 
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, Field
+
+from app.models.challenge import DeploymentType
 
 
 # ============================================================
@@ -139,19 +141,22 @@ class ChallengeBase(BaseModel):
     competition_id: Optional[int] = None
     unlocked_by_id: Optional[int] = None
     # tags as simple strings stored via ChallengeTag rows
-    tags: List[str] = []
+    tags: List[str] = Field(default_factory=list)
     # optional visibility controls (match your model defaults)
     is_active: Optional[bool] = True
     is_private: Optional[bool] = False
     visible_from: Optional[datetime] = None
     visible_to: Optional[datetime] = None
+    deployment_type: DeploymentType = DeploymentType.dynamic_container
+    service_port: Optional[int] = None
+    always_on: Optional[bool] = False
 
 
 class ChallengeCreate(ChallengeBase):
     # keep flag in write-only create model; do NOT expose in reads
     flag: str
     # nested hints
-    hints: List[HintCreate] = []
+    hints: List[HintCreate] = Field(default_factory=list)
 
 
 class ChallengeUpdate(BaseModel):
@@ -169,6 +174,9 @@ class ChallengeUpdate(BaseModel):
     is_private: Optional[bool] = None
     visible_from: Optional[datetime] = None
     visible_to: Optional[datetime] = None
+    deployment_type: Optional[DeploymentType] = None
+    service_port: Optional[int] = None
+    always_on: Optional[bool] = None
     # allow full replacement of hints if provided
     hints: Optional[List[HintCreate]] = None
     # allow updating flag (write-only). Don’t mirror back in any read model.
@@ -192,12 +200,16 @@ class ChallengePublic(BaseModel):
     is_private: bool
     visible_from: Optional[datetime] = None
     visible_to: Optional[datetime] = None
+    deployment_type: DeploymentType
+    service_port: Optional[int] = None
+    always_on: bool
     # derived / related
-    tags: List[str] = []
-    hints: List[HintRead] = []
-    attachments: List[AttachmentRead] = []
+    tags: List[str] = Field(default_factory=list)
+    hints: List[HintRead] = Field(default_factory=list)
+    attachments: List[AttachmentRead] = Field(default_factory=list)
     active_instance: Optional[ChallengeInstanceRead] = None
     access_url: Optional[str] = None
+    solves_count: int = 0
     solves_count: int = 0  # fill in route from related table
 
 
@@ -221,9 +233,12 @@ class ChallengeAdmin(BaseModel):
     is_private: bool
     visible_from: Optional[datetime] = None
     visible_to: Optional[datetime] = None
-    tags: List[str] = []
-    hints: List[HintRead] = []
-    attachments: List[AttachmentRead] = []
+    deployment_type: DeploymentType
+    service_port: Optional[int] = None
+    always_on: bool
+    tags: List[str] = Field(default_factory=list)
+    hints: List[HintRead] = Field(default_factory=list)
+    attachments: List[AttachmentRead] = Field(default_factory=list)
     active_instance: Optional[ChallengeInstanceRead] = None
     access_url: Optional[str] = None
     solves_count: int = 0

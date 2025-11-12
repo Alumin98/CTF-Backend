@@ -6,6 +6,13 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     env_file:
       - .env.docker
+    environment:
+      - CHALLENGE_RUNNER=${CHALLENGE_RUNNER:-local}
+      - CHALLENGE_DOCKER_HOST=${CHALLENGE_DOCKER_HOST:-}
+      - CHALLENGE_DOCKER_TLS_VERIFY=${CHALLENGE_DOCKER_TLS_VERIFY:-}
+      - CHALLENGE_DOCKER_TLS_CA_CERT=${CHALLENGE_DOCKER_TLS_CA_CERT:-}
+      - CHALLENGE_DOCKER_TLS_CERT=${CHALLENGE_DOCKER_TLS_CERT:-}
+      - CHALLENGE_DOCKER_TLS_KEY=${CHALLENGE_DOCKER_TLS_KEY:-}
     volumes:
       - .:/app
       - /var/run/docker.sock:/var/run/docker.sock

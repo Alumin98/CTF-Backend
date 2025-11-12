@@ -1,6 +1,8 @@
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, DateTime, func
+import enum
+
+from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, DateTime, func, Enum
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -16,6 +18,12 @@ from app.models.challenge_attachment import ChallengeAttachment
 
 if TYPE_CHECKING:
     from app.models.submission import Submission
+
+
+class DeploymentType(str, enum.Enum):
+    dynamic_container = "dynamic_container"
+    static_container = "static_container"
+    static_attachment = "static_attachment"
 
 
 class Challenge(Base):
@@ -36,6 +44,13 @@ class Challenge(Base):
     created_at = Column(DateTime, default=func.now())
     competition_id = Column(Integer, ForeignKey("competitions.id"), nullable=True)
     unlocked_by_id = Column(Integer, ForeignKey("challenges.id"), nullable=True)  # recently added
+    deployment_type = Column(
+        Enum(DeploymentType, name="challenge_deployment_type", native_enum=False),
+        nullable=False,
+        server_default=DeploymentType.dynamic_container.value,
+    )
+    service_port = Column(Integer, nullable=True)
+    always_on = Column(Boolean, nullable=False, server_default="false")
 
     # --- Relationships (no schema change) ---
     # Tags (each row in challenge_tags is a single string tag for this challenge)
