@@ -64,6 +64,24 @@ DB_INIT_MAX_ATTEMPTS=10      # how many connection retries before giving up
 DB_INIT_RETRY_SECONDS=1.0    # base delay (seconds) between retries; doubles each time up to 8s
 ```
 
+### Container runners
+Challenge instances can be orchestrated by different backends via the
+`CHALLENGE_RUNNER` environment variable:
+
+| Value            | Description                                                                 | Key variables |
+|------------------|-----------------------------------------------------------------------------|---------------|
+| `local` (default)| Uses the Docker socket mounted into the backend container.                  | *(none)*      |
+| `remote-docker`  | Connects to a remote Docker Engine over TLS.                                | `REMOTE_DOCKER_HOST`, `REMOTE_DOCKER_TLS_VERIFY`, `REMOTE_DOCKER_CA_CERT`, `REMOTE_DOCKER_CLIENT_CERT`, `REMOTE_DOCKER_CLIENT_KEY` |
+| `kubernetes`     | Reserved for future expansion; the API exposes `/runner/health` but launch  |
+|                  | requests currently return an informative error until the integration ships. |               |
+
+When targeting a remote Docker Engine, populate the certificate paths either in
+`.env.docker` or your deployment’s environment configuration. The compose file
+propagates these variables into the backend container so the TLS handshake can
+succeed. Static challenges with `deployment_type="static_container"` and
+`always_on=true` are started automatically during API startup and monitored by
+the runner health endpoint at `/runner/health`.
+
 ### Running without Docker
 If you prefer to launch the API directly with `uvicorn`, make sure a PostgreSQL
 instance is already accepting connections on the URL defined in `DATABASE_URL`.

@@ -10,7 +10,8 @@ from sqlalchemy import select, func, desc, asc, cast, Boolean, insert
 
 from app.database import get_db
 from app.auth_token import get_current_user
-from app.routes.auth import hash_flag
+from app.flag_storage import hash_flag, verify_flag
+from app.rate_limiter import get_submission_rate_limiter, RateLimitExceeded
 
 from app.models.submission import Submission
 from app.models.challenge import Challenge
@@ -57,7 +58,14 @@ async def submit_flag(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    limiter = get_submission_rate_limiter()
+
     try:
+        try:
+            await limiter.check(f"user:{user.id}")
+        except RateLimitExceeded as exc:
+            raise HTTPException(status_code=429, detail="Too many submissions, slow down.") from exc
+
         # 1) Challenge must exist
         ch_res = await db.execute(
             select(Challenge).where(Challenge.id == submission.challenge_id)
@@ -82,8 +90,7 @@ async def submit_flag(
             }
 
         # 3) Check flag
-        submitted_hash = hash_flag(submission.submitted_flag)
-        is_correct_bool = (submitted_hash == challenge.flag)
+        is_correct_bool = verify_flag(submission.submitted_flag, challenge.flag)
 
         # 4) First blood? (before inserting ours)
         fb_res = await db.execute(
@@ -124,6 +131,8 @@ async def submit_flag(
             score_awarded = apply_hint_penalty(points, penalties)
 
         # 6) Save submission (TEXT 'true'/'false' in DB)
+        submitted_hash = hash_flag(submission.submitted_flag)
+
         new_sub = Submission(
             user_id=user.id,
             challenge_id=challenge.id,

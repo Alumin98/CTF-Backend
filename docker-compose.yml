@@ -6,6 +6,13 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     env_file:
       - .env.docker
+    environment:
+      CHALLENGE_RUNNER: ${CHALLENGE_RUNNER:-local}
+      REMOTE_DOCKER_HOST: ${REMOTE_DOCKER_HOST:-}
+      REMOTE_DOCKER_TLS_VERIFY: ${REMOTE_DOCKER_TLS_VERIFY:-1}
+      REMOTE_DOCKER_CA_CERT: ${REMOTE_DOCKER_CA_CERT:-}
+      REMOTE_DOCKER_CLIENT_CERT: ${REMOTE_DOCKER_CLIENT_CERT:-}
+      REMOTE_DOCKER_CLIENT_KEY: ${REMOTE_DOCKER_CLIENT_KEY:-}
     volumes:
       - .:/app
       - /var/run/docker.sock:/var/run/docker.sock

@@ -6,12 +6,15 @@ from dotenv import load_dotenv  # load .env variables
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 from app import database
 from app.database import async_session
-from app.services.container_service import get_container_service
+from app.services.container_service import (
+    InstanceLaunchError,
+    get_container_service,
+)
 
 # ----- Load environment variables -----
 load_dotenv()
@@ -41,6 +44,7 @@ from app.routes.submissions import router as submission_router
 from app.routes import competition as competition_routes
 from app.routes.password_reset import router as password_reset_router
 from app.routes.scoreboard import router as scoreboard_router
+from app.routes.runner_health import router as runner_health_router
 
 # ----- FastAPI app -----
 app = FastAPI(
@@ -78,6 +82,7 @@ app.include_router(submission_router)
 app.include_router(competition_routes.router)
 app.include_router(password_reset_router)
 app.include_router(scoreboard_router)
+app.include_router(runner_health_router)
 
 # ----- Startup: ensure tables exist -----
 async def _ensure_first_blood_column(conn):
@@ -135,6 +140,53 @@ async def _ensure_user_profile_columns(conn):
                 raise
 
 
+async def _ensure_challenge_deployment_columns(conn):
+    if conn.dialect.name == "sqlite":
+        statements = [
+            "ALTER TABLE challenges ADD COLUMN deployment_type VARCHAR(32) DEFAULT 'static_attachment'",
+            "ALTER TABLE challenges ADD COLUMN service_port INTEGER",
+            "ALTER TABLE challenges ADD COLUMN always_on BOOLEAN DEFAULT 0",
+        ]
+    else:
+        statements = [
+            "ALTER TABLE challenges ADD COLUMN IF NOT EXISTS deployment_type VARCHAR(32) DEFAULT 'static_attachment'",
+            "ALTER TABLE challenges ADD COLUMN IF NOT EXISTS service_port INTEGER",
+            "ALTER TABLE challenges ADD COLUMN IF NOT EXISTS always_on BOOLEAN DEFAULT FALSE",
+        ]
+
+    for ddl in statements:
+        try:
+            await conn.execute(text(ddl))
+        except DBAPIError as ddl_error:
+            message = str(getattr(ddl_error, "orig", ddl_error)).lower()
+            if not any(
+                phrase in message
+                for phrase in (
+                    "duplicate column name",
+                    "already exists",
+                    'column "deployment_type" of relation "challenges" already exists',
+                    'column "service_port" of relation "challenges" already exists',
+                    'column "always_on" of relation "challenges" already exists',
+                )
+            ):
+                raise
+
+
+async def _relax_instance_user_constraint(conn):
+    if conn.dialect.name == "sqlite":
+        return  # SQLite cannot drop NOT NULL without a table rebuild
+
+    ddl = text("ALTER TABLE challenge_instances ALTER COLUMN user_id DROP NOT NULL")
+    try:
+        await conn.execute(ddl)
+    except DBAPIError as ddl_error:
+        message = str(getattr(ddl_error, "orig", ddl_error)).lower()
+        if "does not exist" in message or "not null constraint" not in message:
+            # column may already be nullable or database might not support the syntax
+            return
+        raise
+
+
 @app.on_event("startup")
 async def on_startup():
     """Ensure database connectivity with simple retry logic."""
@@ -150,6 +202,8 @@ async def on_startup():
                 await conn.run_sync(database.Base.metadata.create_all)
                 await _ensure_first_blood_column(conn)
                 await _ensure_user_profile_columns(conn)
+                await _ensure_challenge_deployment_columns(conn)
+                await _relax_instance_user_constraint(conn)
         except (OperationalError, DBAPIError, OSError) as exc:  # pragma: no cover - depends on timing
             if attempt >= max_attempts:
                 allow_sqlite_fallback = os.getenv("DB_ALLOW_SQLITE_FALLBACK", "1").lower() in {
@@ -196,7 +250,9 @@ async def on_startup():
                 "CTF backend API started and database tables ensured (using %s).",
                 database.CURRENT_DATABASE_URL,
             )
-            await get_container_service().start_cleanup_task(async_session)
+            service = get_container_service()
+            await _ensure_always_on_static_containers(service)
+            await service.start_cleanup_task(async_session)
             break
 
 # ----- Health check endpoint -----
@@ -216,3 +272,21 @@ async def on_shutdown():
     service = get_container_service()
     await service.stop_cleanup_task()
 
+async def _ensure_always_on_static_containers(service) -> None:
+    async with async_session() as session:
+        result = await session.execute(
+            select(Challenge).where(
+                Challenge.deployment_type == DeploymentType.STATIC_CONTAINER.value,
+                Challenge.always_on == True,
+            )
+        )
+        for challenge in result.scalars().all():
+            try:
+                await service.ensure_static_instance(session, challenge=challenge)
+            except InstanceLaunchError as exc:
+                logging.error(
+                    "Failed to ensure static container for challenge %s: %s",
+                    challenge.id,
+                    exc,
+                )
+from app.models.challenge import Challenge, DeploymentType

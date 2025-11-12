@@ -1,5 +1,4 @@
 
-import hashlib
 import hmac
 import os
 
@@ -20,10 +19,12 @@ from app.schemas import (
 )
 from app.security import pwd_context
 
-router = APIRouter()
+# Backwards compatibility: other modules previously imported ``hash_flag`` from
+# this module. Re-export the helper from ``app.flag_storage`` so imports keep
+# working while the implementation lives in a dedicated module.
+from app.flag_storage import hash_flag  # noqa: F401
 
-def hash_flag(flag: str) -> str:
-    return hashlib.sha256(flag.encode("utf-8")).hexdigest()
+router = APIRouter()
 
 @router.post("/register")
 async def register(user: UserRegister, db: AsyncSession = Depends(get_db)):

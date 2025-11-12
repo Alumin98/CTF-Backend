@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth_token import get_current_user, require_admin
 from app.database import get_db
-from app.routes.auth import hash_flag
+from app.flag_storage import hash_flag
 from app.models.challenge import Challenge
 from app.models.challenge_attachment import ChallengeAttachment
 from app.models.challenge_instance import ChallengeInstance
@@ -100,6 +100,9 @@ def _challenge_to_public(
         is_private=challenge.is_private,
         visible_from=getattr(challenge, "visible_from", None),
         visible_to=getattr(challenge, "visible_to", None),
+        deployment_type=getattr(challenge, "deployment_type", "static_attachment"),
+        service_port=getattr(challenge, "service_port", None),
+        always_on=bool(getattr(challenge, "always_on", False)),
         tags=challenge.tag_strings,
         hints=[_hint_to_schema(h) for h in hints],
         attachments=[_attachment_to_schema(challenge.id, att) for att in attachments],

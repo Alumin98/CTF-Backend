@@ -93,7 +93,7 @@ _install_model_stub("app.models.user", {"User": _UserStub})
 
 
 from app.routes.admin_challenges import create_challenge  # noqa: E402
-from app.routes.auth import hash_flag  # noqa: E402
+from app.flag_storage import hash_flag, verify_flag  # noqa: E402
 from app.schemas import ChallengeCreate  # noqa: E402
 
 
@@ -148,7 +148,7 @@ def test_new_challenge_stores_hashed_flag():
         assert result.id == 1
 
         challenge = session.added[0]
-        assert challenge.flag == hash_flag(plain_flag)
+        assert verify_flag(plain_flag, challenge.flag)
         assert challenge.flag != plain_flag
 
     asyncio.run(_run())

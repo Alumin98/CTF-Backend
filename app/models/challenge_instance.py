@@ -16,7 +16,7 @@ class ChallengeInstance(Base):
 
     id = Column(Integer, primary_key=True)
     challenge_id = Column(Integer, ForeignKey("challenges.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     status = Column(String(32), nullable=False, default="starting")
     container_id = Column(String(128), nullable=True)
     connection_info = Column(JSON, nullable=True)

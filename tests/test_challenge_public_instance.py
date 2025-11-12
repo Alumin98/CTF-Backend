@@ -21,6 +21,8 @@ def _make_challenge() -> Challenge:
     challenge.is_active = True
     challenge.is_private = False
     challenge.service_url_path = "/challenge1/"
+    challenge.deployment_type = "dynamic_container"
+    challenge.always_on = False
     return challenge
 
 

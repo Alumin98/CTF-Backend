@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING
 
+from enum import Enum
+
 from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, DateTime, func
 from sqlalchemy.orm import relationship
 
@@ -18,6 +20,12 @@ if TYPE_CHECKING:
     from app.models.submission import Submission
 
 
+class DeploymentType(str, Enum):
+    DYNAMIC_CONTAINER = "dynamic_container"
+    STATIC_CONTAINER = "static_container"
+    STATIC_ATTACHMENT = "static_attachment"
+
+
 class Challenge(Base):
     __tablename__ = "challenges"
 
@@ -29,6 +37,9 @@ class Challenge(Base):
     points = Column(Integer)  # keep as-is; dynamic scoring can be computed at submission time
     difficulty = Column(String(20), nullable=True, default="easy")
     docker_image = Column(String(255), nullable=True)
+    deployment_type = Column(String(32), nullable=False, server_default=DeploymentType.STATIC_ATTACHMENT.value)
+    service_port = Column(Integer, nullable=True)
+    always_on = Column(Boolean, nullable=False, server_default="false")
     is_active = Column(Boolean, nullable=False, server_default="true")
     is_private = Column(Boolean, nullable=False, server_default="false")
     visible_from = Column(DateTime, nullable=True)

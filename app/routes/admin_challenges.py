@@ -16,7 +16,7 @@ from app.models.hint import Hint
 from app.models.challenge_tag import ChallengeTag
 from app.models.submission import Submission  # used to count solves
 from app.models.challenge_attachment import ChallengeAttachment
-from app.routes.auth import hash_flag
+from app.flag_storage import hash_flag
 from app.schemas import (
     ChallengeCreate, ChallengeUpdate, ChallengeAdmin, HintCreate, AttachmentRead
 )
@@ -113,6 +113,9 @@ def _to_admin_schema(ch: Challenge, solves: int) -> ChallengeAdmin:
         is_private=bool(ch.is_private),
         visible_from=ch.visible_from,
         visible_to=ch.visible_to,
+        deployment_type=getattr(ch, "deployment_type", "static_attachment"),
+        service_port=getattr(ch, "service_port", None),
+        always_on=bool(getattr(ch, "always_on", False)),
         tags=ch.tag_strings,
         hints=sorted(ch.hints or [], key=lambda h: h.order_index),
         attachments=attachments,
@@ -132,6 +135,9 @@ async def create_challenge(
         points=payload.points,
         difficulty=payload.difficulty or "easy",
         docker_image=payload.docker_image,
+        deployment_type=payload.deployment_type,
+        service_port=payload.service_port,
+        always_on=payload.always_on,
         is_active=True if payload.is_active is None else payload.is_active,
         is_private=False if payload.is_private is None else payload.is_private,
         visible_from=_as_naive_utc(payload.visible_from),
@@ -256,9 +262,21 @@ async def update_challenge_admin(
 
     # scalar fields
     for field in [
-        "title", "description", "category_id", "points", "difficulty",
-        "docker_image", "competition_id", "unlocked_by_id",
-        "is_active", "is_private", "visible_from", "visible_to",
+        "title",
+        "description",
+        "category_id",
+        "points",
+        "difficulty",
+        "docker_image",
+        "deployment_type",
+        "service_port",
+        "always_on",
+        "competition_id",
+        "unlocked_by_id",
+        "is_active",
+        "is_private",
+        "visible_from",
+        "visible_to",
     ]:
         val = getattr(payload, field)
         if val is not None:

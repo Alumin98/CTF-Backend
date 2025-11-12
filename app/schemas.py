@@ -3,7 +3,7 @@
 # Pydantic v2 schemas, organized by domain
 # ------------------------------------------------------------
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 from pydantic import BaseModel, EmailStr, ConfigDict
 
@@ -136,6 +136,13 @@ class ChallengeBase(BaseModel):
     points: int
     difficulty: Optional[str] = "easy"
     docker_image: Optional[str] = None
+    deployment_type: Literal[
+        "dynamic_container",
+        "static_container",
+        "static_attachment",
+    ] = "static_attachment"
+    service_port: Optional[int] = None
+    always_on: bool = False
     competition_id: Optional[int] = None
     unlocked_by_id: Optional[int] = None
     # tags as simple strings stored via ChallengeTag rows
@@ -162,6 +169,13 @@ class ChallengeUpdate(BaseModel):
     points: Optional[int] = None
     difficulty: Optional[str] = None
     docker_image: Optional[str] = None
+    deployment_type: Optional[Literal[
+        "dynamic_container",
+        "static_container",
+        "static_attachment",
+    ]] = None
+    service_port: Optional[int] = None
+    always_on: Optional[bool] = None
     competition_id: Optional[int] = None
     unlocked_by_id: Optional[int] = None
     tags: Optional[List[str]] = None
@@ -192,6 +206,9 @@ class ChallengePublic(BaseModel):
     is_private: bool
     visible_from: Optional[datetime] = None
     visible_to: Optional[datetime] = None
+    deployment_type: str
+    service_port: Optional[int] = None
+    always_on: bool
     # derived / related
     tags: List[str] = []
     hints: List[HintRead] = []
@@ -221,6 +238,9 @@ class ChallengeAdmin(BaseModel):
     is_private: bool
     visible_from: Optional[datetime] = None
     visible_to: Optional[datetime] = None
+    deployment_type: str
+    service_port: Optional[int] = None
+    always_on: bool
     tags: List[str] = []
     hints: List[HintRead] = []
     attachments: List[AttachmentRead] = []

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth_token import get_current_user
 from app.database import get_db
-from app.models.challenge import Challenge
+from app.models.challenge import Challenge, DeploymentType
 from app.models.challenge_instance import ChallengeInstance
 from app.models.user import User
 from app.schemas import ChallengeInstanceRead
@@ -89,7 +89,15 @@ async def get_my_instance(
         raise HTTPException(status_code=404, detail="Challenge not available")
 
     service = get_container_service()
-    instance = await service.get_latest_active_instance(db, challenge_id=challenge_id, user_id=user.id)
+    if getattr(challenge, "deployment_type", DeploymentType.STATIC_ATTACHMENT.value) == DeploymentType.STATIC_CONTAINER.value:
+        instance = await service.get_shared_instance(db, challenge_id=challenge.id)
+        if not instance:
+            if getattr(challenge, "always_on", False):
+                instance = await service.ensure_static_instance(db, challenge=challenge)
+            else:
+                raise HTTPException(status_code=404, detail="No active instance")
+    else:
+        instance = await service.get_latest_active_instance(db, challenge_id=challenge_id, user_id=user.id)
     if not instance:
         raise HTTPException(status_code=404, detail="No active instance")
 
