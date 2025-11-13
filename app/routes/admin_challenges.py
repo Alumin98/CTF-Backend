@@ -147,6 +147,7 @@ def _to_admin_schema(ch: Challenge, solves: int) -> ChallengeAdmin:
         hints=sorted(ch.hints or [], key=lambda h: h.order_index),
         attachments=attachments,
         solves_count=solves,
+        flag_hash=getattr(ch, "flag", None),
     )
 
 @admin.post("", response_model=ChallengeAdmin, status_code=201)

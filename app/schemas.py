@@ -236,10 +236,7 @@ class ChallengePublic(BaseModel):
 
 
 class ChallengeAdmin(BaseModel):
-    """
-    Same as public, but reserved for future admin-only fields
-    (we still do NOT expose the flag here).
-    """
+    """Admin-facing challenge details, including the stored flag hash."""
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -264,6 +261,7 @@ class ChallengeAdmin(BaseModel):
     active_instance: Optional[ChallengeInstanceRead] = None
     access_url: Optional[str] = None
     solves_count: int = 0
+    flag_hash: Optional[str] = None
 
 
 # ============================================================
