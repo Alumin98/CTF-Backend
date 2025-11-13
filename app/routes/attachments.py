@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.models.challenge import Challenge
@@ -80,14 +81,14 @@ async def download_attachment(
 ):
     stmt = (
         select(ChallengeAttachment)
-        .join(Challenge, Challenge.id == ChallengeAttachment.challenge_id)
+        .options(selectinload(ChallengeAttachment.challenge))
         .where(
             ChallengeAttachment.id == attachment_id,
             ChallengeAttachment.challenge_id == challenge_id,
         )
     )
     result = await db.execute(stmt)
-    attachment = result.scalars().first()
+    attachment = result.scalars().unique().first()
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
 

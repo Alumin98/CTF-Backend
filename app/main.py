@@ -6,12 +6,10 @@ from dotenv import load_dotenv  # load .env variables
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 import app.database as database
 from app.services.container_service import get_container_service
-from app.models.challenge import Challenge, DeploymentType
 
 # ----- Load environment variables -----
 load_dotenv()
@@ -75,86 +73,6 @@ app.include_router(password_reset_router)
 app.include_router(scoreboard_router)
 app.include_router(runner_health_router)
 
-# ----- Startup: ensure tables exist -----
-async def _ensure_first_blood_column(conn):
-    if conn.dialect.name == "sqlite":
-        ddl = text(
-            "ALTER TABLE submissions ADD COLUMN first_blood "
-            "BOOLEAN NOT NULL DEFAULT 0"
-        )
-    else:
-        ddl = text(
-            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS first_blood "
-            "BOOLEAN NOT NULL DEFAULT FALSE"
-        )
-
-    try:
-        await conn.execute(ddl)
-    except DBAPIError as ddl_error:  # column may already exist
-        message = str(getattr(ddl_error, "orig", ddl_error)).lower()
-        if not any(
-            phrase in message
-            for phrase in (
-                "duplicate column name",
-                "already exists",
-                'column "first_blood" of relation "submissions" already exists',
-            )
-        ):
-            raise
-
-
-async def _ensure_user_profile_columns(conn):
-    statements = []
-    if conn.dialect.name == "sqlite":
-        statements.append("ALTER TABLE users ADD COLUMN display_name TEXT")
-        statements.append("ALTER TABLE users ADD COLUMN bio TEXT")
-    else:
-        statements.append(
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(120)"
-        )
-        statements.append("ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT")
-
-    for ddl in statements:
-        try:
-            await conn.execute(text(ddl))
-        except DBAPIError as ddl_error:
-            message = str(getattr(ddl_error, "orig", ddl_error)).lower()
-            if not any(
-                phrase in message
-                for phrase in (
-                    "duplicate column name",
-                    "already exists",
-                    'column "display_name" of relation "users" already exists',
-                    'column "bio" of relation "users" already exists',
-                )
-            ):
-                raise
-
-
-async def _ensure_hint_order_index_column(conn):
-    if conn.dialect.name == "sqlite":
-        ddl = "ALTER TABLE hints ADD COLUMN order_index INTEGER NOT NULL DEFAULT 0"
-    else:
-        ddl = (
-            "ALTER TABLE hints ADD COLUMN IF NOT EXISTS order_index "
-            "INTEGER NOT NULL DEFAULT 0"
-        )
-
-    try:
-        await conn.execute(text(ddl))
-    except DBAPIError as ddl_error:
-        message = str(getattr(ddl_error, "orig", ddl_error)).lower()
-        if not any(
-            phrase in message
-            for phrase in (
-                "duplicate column name",
-                "already exists",
-                'column "order_index" of relation "hints" already exists',
-            )
-        ):
-            raise
-
-
 @app.on_event("startup")
 async def on_startup():
     """Ensure database connectivity with simple retry logic."""
@@ -182,10 +100,6 @@ async def on_startup():
         attempt += 1
         try:
             await database.init_models()
-            async with database.engine.begin() as conn:
-                await _ensure_first_blood_column(conn)
-                await _ensure_user_profile_columns(conn)
-                await _ensure_hint_order_index_column(conn)
         except (OperationalError, DBAPIError, OSError) as exc:  # pragma: no cover - depends on timing
             if attempt >= max_attempts:
                 if sqlite_fallback_allowed() and (

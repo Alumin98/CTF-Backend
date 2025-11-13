@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import types
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -93,6 +94,7 @@ _install_model_stub("app.models.user", {"User": _UserStub})
 
 
 from app.routes.admin_challenges import create_challenge  # noqa: E402
+from app.routes.admin_challenges import _to_admin_schema  # noqa: E402
 from app.flag_storage import hash_flag, verify_flag  # noqa: E402
 from app.schemas import ChallengeCreate  # noqa: E402
 
@@ -152,3 +154,20 @@ def test_new_challenge_stores_hashed_flag():
         assert challenge.flag != plain_flag
 
     asyncio.run(_run())
+
+
+def test_admin_schema_exposes_stored_flag_hash():
+    hashed = hash_flag("FLAG{secret}")
+    challenge = _ChallengeStub(
+        id=7,
+        flag=hashed,
+        title="Demo",
+        description="",
+        category_id=1,
+        points=100,
+        created_at=datetime.utcnow(),
+    )
+
+    result = _to_admin_schema(challenge, solves=0)
+
+    assert result.flag_hash == hashed
