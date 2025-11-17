@@ -3,11 +3,59 @@
 # Pydantic v2 schemas, organized by domain
 # ------------------------------------------------------------
 from datetime import datetime
-from typing import Optional, List
+import re
+from typing import Optional, List, Sequence
 
-from pydantic import BaseModel, EmailStr, ConfigDict, Field
+from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator
 
 from app.models.challenge import DeploymentType
+
+
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+_SCRIPT_TAG_RE = re.compile(r"<\s*/?\s*script", re.IGNORECASE)
+
+
+def _sanitize_single_line_text(value: str | None, *, allow_empty: bool = False) -> str | None:
+    if value is None:
+        return value
+    if not isinstance(value, str):
+        raise TypeError("Expected string input")
+    cleaned = _CONTROL_CHAR_RE.sub("", value).strip()
+    if not allow_empty and not cleaned:
+        raise ValueError("Value cannot be empty")
+    if any(ch in {"\n", "\r"} for ch in cleaned):
+        raise ValueError("Value must be a single line of text")
+    if "<" in cleaned or ">" in cleaned:
+        raise ValueError("HTML tags are not allowed in this field")
+    if _SCRIPT_TAG_RE.search(cleaned):
+        raise ValueError("Script tags are not allowed")
+    return cleaned
+
+
+def _sanitize_multiline_text(value: str | None, *, allow_empty: bool = False) -> str | None:
+    if value is None:
+        return value
+    if not isinstance(value, str):
+        raise TypeError("Expected string input")
+    cleaned = _CONTROL_CHAR_RE.sub("", value).strip()
+    if not allow_empty and not cleaned:
+        raise ValueError("Value cannot be empty")
+    if _SCRIPT_TAG_RE.search(cleaned):
+        raise ValueError("Script tags are not allowed")
+    return cleaned
+
+
+def _sanitize_tags(value: Sequence[str] | str | None) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = [value]
+    cleaned: list[str] = []
+    for tag in value:
+        sanitized = _sanitize_single_line_text(str(tag))
+        if sanitized:
+            cleaned.append(sanitized)
+    return cleaned
 
 
 # ============================================================
@@ -15,9 +63,14 @@ from app.models.challenge import DeploymentType
 # ============================================================
 
 class UserRegister(BaseModel):
-    username: str
+    username: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9_.-]+$")
     email: EmailStr
-    password: str
+    password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def _clean_username(cls, value: str) -> str:
+        return _sanitize_single_line_text(value)
 
 
 class UserLogin(BaseModel):
@@ -40,11 +93,45 @@ class UserProfileRead(UserProfile):
 
 
 class UserProfileUpdate(BaseModel):
-    username: Optional[str] = None
+    username: Optional[str] = Field(default=None, min_length=3, max_length=32, pattern=r"^[A-Za-z0-9_.-]+$")
     email: Optional[EmailStr] = None
     password: Optional[str] = None
-    display_name: Optional[str] = None
-    bio: Optional[str] = None
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    bio: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def _clean_optional_username(cls, value: Optional[str]) -> Optional[str]:
+        return _sanitize_single_line_text(value) if value is not None else value
+
+    @field_validator("password", mode="before")
+    @classmethod
+    def _clean_password(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        if not isinstance(value, str):
+            raise TypeError("Expected string input")
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("display_name", mode="before")
+    @classmethod
+    def _clean_display_name(cls, value: Optional[str]) -> Optional[str]:
+        return _sanitize_single_line_text(value) if value is not None else value
+
+    @field_validator("bio", mode="before")
+    @classmethod
+    def _clean_bio(cls, value: Optional[str]) -> Optional[str]:
+        return _sanitize_multiline_text(value, allow_empty=True) if value is not None else value
+
+
+class AdminBootstrapRequest(BaseModel):
+    token: str = Field(min_length=8, max_length=128)
+
+    @field_validator("token", mode="before")
+    @classmethod
+    def _clean_token(cls, value: str) -> str:
+        return _sanitize_single_line_text(value)
 
 
 # ============================================================
@@ -52,7 +139,12 @@ class UserProfileUpdate(BaseModel):
 # ============================================================
 
 class TeamCreate(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=64)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        return _sanitize_single_line_text(value)
 
 
 class TeamReadPublic(BaseModel):
@@ -92,9 +184,14 @@ class TeamReadAdmin(BaseModel):
 
 # ---- Hints ----
 class HintCreate(BaseModel):
-    text: str
+    text: str = Field(min_length=1, max_length=500)
     penalty: int = 0
     order_index: int = 0
+
+    @field_validator("text", mode="before")
+    @classmethod
+    def _clean_text(cls, value: str) -> str:
+        return _sanitize_multiline_text(value)
 
 
 class HintRead(BaseModel):
@@ -131,8 +228,18 @@ class ChallengeInstanceRead(BaseModel):
 
 # ---- Challenge base / create / update ----
 class CategoryBase(BaseModel):
-    name: str
-    description: Optional[str] = None
+    name: str = Field(min_length=1, max_length=64)
+    description: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        return _sanitize_single_line_text(value)
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _clean_description(cls, value: Optional[str]) -> Optional[str]:
+        return _sanitize_multiline_text(value, allow_empty=True) if value is not None else value
 
 
 class CategoryCreate(CategoryBase):
@@ -153,13 +260,13 @@ class CategoryRead(BaseModel):
 
 
 class ChallengeBase(BaseModel):
-    title: str
-    description: str
+    title: str = Field(min_length=3, max_length=128)
+    description: str = Field(min_length=1, max_length=5000)
     category_id: int
     # static points kept for now; dynamic scoring can override at submission time
-    points: int
-    difficulty: Optional[str] = "easy"
-    docker_image: Optional[str] = None
+    points: int = Field(ge=0, le=10000)
+    difficulty: Optional[str] = Field(default="easy", max_length=32)
+    docker_image: Optional[str] = Field(default=None, max_length=255)
     competition_id: Optional[int] = None
     unlocked_by_id: Optional[int] = None
     # tags as simple strings stored via ChallengeTag rows
@@ -173,12 +280,33 @@ class ChallengeBase(BaseModel):
     service_port: Optional[int] = None
     always_on: Optional[bool] = False
 
+    @field_validator("title", "difficulty", "docker_image", mode="before")
+    @classmethod
+    def _clean_single_line_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _sanitize_single_line_text(value) if value is not None else value
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _clean_description(cls, value: str) -> str:
+        return _sanitize_multiline_text(value)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _clean_tags(cls, value):
+        sanitized = _sanitize_tags(value)
+        return sanitized or []
+
 
 class ChallengeCreate(ChallengeBase):
     # keep flag in write-only create model; do NOT expose in reads
-    flag: str
+    flag: str = Field(min_length=1, max_length=256)
     # nested hints
     hints: List[HintCreate] = Field(default_factory=list)
+
+    @field_validator("flag", mode="before")
+    @classmethod
+    def _clean_flag(cls, value: str) -> str:
+        return _sanitize_single_line_text(value)
 
 
 class ChallengeUpdate(BaseModel):
@@ -196,13 +324,35 @@ class ChallengeUpdate(BaseModel):
     is_private: Optional[bool] = None
     visible_from: Optional[datetime] = None
     visible_to: Optional[datetime] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
     deployment_type: Optional[DeploymentType] = None
     service_port: Optional[int] = None
     always_on: Optional[bool] = None
     # allow full replacement of hints if provided
     hints: Optional[List[HintCreate]] = None
     # allow updating flag (write-only). Don’t mirror back in any read model.
-    flag: Optional[str] = None
+    flag: Optional[str] = Field(default=None, min_length=1, max_length=256)
+
+    @field_validator("title", "difficulty", "docker_image", mode="before")
+    @classmethod
+    def _clean_optional_single_line_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _sanitize_single_line_text(value) if value is not None else value
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _clean_optional_description(cls, value: Optional[str]) -> Optional[str]:
+        return _sanitize_multiline_text(value) if value is not None else value
+
+    @field_validator("flag", mode="before")
+    @classmethod
+    def _clean_flag(cls, value: Optional[str]) -> Optional[str]:
+        return _sanitize_single_line_text(value) if value is not None else value
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _clean_tags(cls, value):
+        return _sanitize_tags(value)
 
 
 # ---- Public/Admin read models (no flag exposure) ----
@@ -270,9 +420,14 @@ class ChallengeAdmin(BaseModel):
 
 class FlagSubmission(BaseModel):
     challenge_id: int
-    submitted_flag: str
+    submitted_flag: str = Field(min_length=1, max_length=256)
     # optional: capture revealed hints to calculate penalties at submit time
     used_hint_ids: Optional[List[int]] = None
+
+    @field_validator("submitted_flag", mode="before")
+    @classmethod
+    def _clean_flag(cls, value: str) -> str:
+        return _sanitize_single_line_text(value)
 
 
 class SubmissionRead(BaseModel):

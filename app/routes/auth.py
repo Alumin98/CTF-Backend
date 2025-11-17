@@ -2,7 +2,7 @@
 import hmac
 import os
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from app.auth_token import create_access_token, get_current_user
 from app.database import get_db
 from app.models.user import User
 from app.schemas import (
+    AdminBootstrapRequest,
     UserLogin,
     UserProfile,
     UserProfileRead,
@@ -119,7 +120,7 @@ async def update_profile(
 
 @router.post("/make-me-admin")
 async def make_me_admin(
-    payload: dict = Body(...),
+    payload: AdminBootstrapRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -138,7 +139,7 @@ async def make_me_admin(
     if not bootstrap_token:
         raise HTTPException(status_code=403, detail="Admin bootstrap disabled")
 
-    provided_token = payload.get("token")
+    provided_token = payload.token
     if not provided_token or not hmac.compare_digest(provided_token, bootstrap_token):
         raise HTTPException(status_code=403, detail="Invalid bootstrap token")
 
