@@ -59,7 +59,11 @@ async def reset_password(
     res = await db.execute(select(User).where(User.reset_token_hash == token_hash))
     user = res.scalar_one_or_none()
 
-    if not user or not user.reset_token_expires_at or user.reset_token_expires_at < now:
+    expires_at = user.reset_token_expires_at if user else None
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if not user or not expires_at or expires_at < now:
         raise HTTPException(status_code=400, detail="Invalid or expired token.")
     if not constant_time_equals(user.reset_token_hash, token_hash):
         raise HTTPException(status_code=400, detail="Invalid or expired token.")

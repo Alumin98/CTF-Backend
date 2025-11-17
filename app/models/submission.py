@@ -1,5 +1,5 @@
 # app/models/submission.py
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column, Integer, String, ForeignKey, DateTime, Boolean, Text,
@@ -7,6 +7,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class Submission(Base):
@@ -23,7 +27,7 @@ class Submission(Base):
     # Stored as TEXT 'true' / 'false' (your routes cast to Boolean when filtering)
     is_correct = Column(String(10), nullable=False, default="false")
 
-    submitted_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    submitted_at = Column(DateTime, default=utcnow, nullable=False, index=True)
     first_blood = Column(Boolean, nullable=False, default=False)
 
     # Persisted scoring + hint usage (added in your DB already)

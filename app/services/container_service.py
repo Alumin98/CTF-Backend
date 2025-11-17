@@ -171,7 +171,7 @@ class ContainerService:
             await db.refresh(instance)
             raise InstanceLaunchError(message) from exc
 
-        started_at = datetime.utcnow()
+        started_at = datetime.now(timezone.utc)
         expires_at = (
             started_at + timedelta(seconds=self.ttl_seconds)
             if self.ttl_seconds
@@ -218,7 +218,7 @@ class ContainerService:
         instance.mark_running(
             container_id=launch.container_id,
             connection_info=launch.connection_info,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
             expires_at=None,
         )
         db.add(instance)
@@ -297,7 +297,7 @@ class ContainerService:
     async def reap_expired_instances(self, db: AsyncSession) -> int:
         """Stop expired instances and return the number cleaned up."""
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         stmt = (
             select(ChallengeInstance)
             .where(

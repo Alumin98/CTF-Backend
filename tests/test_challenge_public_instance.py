@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+from datetime import datetime, timedelta, timezone
+
 from app.models.challenge import Challenge, DeploymentType
 from app.models.challenge_instance import ChallengeInstance
 from app.routes.challenges import _challenge_to_public, _select_display_instance
@@ -53,8 +55,8 @@ def test_select_display_instance_filters_expired_and_stopped():
         challenge_id=1,
         user_id=1,
         status="running",
-        started_at=datetime.utcnow(),
-        expires_at=datetime.utcnow() + timedelta(minutes=10),
+        started_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
     )
     selected = _select_display_instance(active)
     assert selected is not None
