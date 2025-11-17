@@ -114,7 +114,7 @@ async def _run_password_reset_flow():
 
             @staticmethod
             def now(_tz=None):
-                return datetime.utcnow()
+                return datetime.now(timezone.utc)
 
         with patch("app.routes.password_reset.generate_reset_token", return_value="reset-token"), patch(
             "app.routes.password_reset.send_email", return_value=None

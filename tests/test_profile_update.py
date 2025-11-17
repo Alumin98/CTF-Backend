@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -43,7 +43,7 @@ def test_update_profile_changes_fields(monkeypatch):
             password_hash="hash",
             display_name=None,
             bio=None,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
         session = _FakeSession()
@@ -74,7 +74,7 @@ def test_update_profile_rejects_short_password():
             password_hash="hash",
             display_name=None,
             bio=None,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
         session = _FakeSession()
 

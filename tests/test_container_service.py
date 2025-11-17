@@ -115,7 +115,7 @@ def test_ensure_static_instance_reuses_running(monkeypatch):
         existing.mark_running(
             container_id="shared",
             connection_info={"host": "localhost", "ports": []},
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
             expires_at=None,
         )
         session = _FakeSession(instances=[existing])
@@ -144,7 +144,7 @@ def test_build_access_url_uses_host_port():
                 {"host": "localhost", "host_port": "55492", "container_port": "8000/tcp"}
             ],
         },
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(timezone.utc),
         expires_at=None,
     )
 

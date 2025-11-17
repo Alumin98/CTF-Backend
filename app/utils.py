@@ -1,6 +1,6 @@
-from argon2 import PasswordHasher, exceptions as argon2_exceptions 
-from jose import jwt 
-from datetime import datetime, timedelta
+from argon2 import PasswordHasher, exceptions as argon2_exceptions
+from jose import jwt
+from datetime import datetime, timedelta, timezone
 
 #Password Hasher setup
 ph = PasswordHasher()
@@ -26,6 +26,6 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     
 #JWT Token Creation
 def create_access_token(data: dict) -> str:
-        expire = datetime.utcnow() + timedelta(minutes=EXPIRE_MINUTES)
-        data.update({"exp": expire})
-        return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=EXPIRE_MINUTES)
+    data.update({"exp": expire})
+    return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)

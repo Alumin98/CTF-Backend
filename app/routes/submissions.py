@@ -1,6 +1,6 @@
 # app/routes/submissions.py
 
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import os
 import hashlib
@@ -136,7 +136,7 @@ async def submit_flag(
             challenge_id=challenge.id,
             submitted_hash=submitted_hash,
             is_correct="true" if is_correct_bool else "false",
-            submitted_at=datetime.utcnow(),
+            submitted_at=datetime.now(timezone.utc),
             first_blood=is_first_blood,
             points_awarded=score_awarded if is_correct_bool else 0,
             used_hint_ids=",".join(map(str, submission.used_hint_ids)) if submission.used_hint_ids else None,

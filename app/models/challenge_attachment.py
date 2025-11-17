@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class ChallengeAttachment(Base):
@@ -18,6 +22,6 @@ class ChallengeAttachment(Base):
     storage_backend = Column(String(32), nullable=False)
     storage_path = Column(String(512), nullable=False)
     filesize = Column(Integer, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
 
     challenge = relationship("Challenge", back_populates="attachments")

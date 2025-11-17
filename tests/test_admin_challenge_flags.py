@@ -1,7 +1,7 @@
 import asyncio
 import sys
 import types
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -165,7 +165,7 @@ def test_admin_schema_exposes_stored_flag_hash():
         description="",
         category_id=1,
         points=100,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
 
     result = _to_admin_schema(challenge, solves=0)

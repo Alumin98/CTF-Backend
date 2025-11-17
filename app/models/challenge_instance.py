@@ -9,6 +9,10 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class ChallengeInstance(Base):
     __tablename__ = "challenge_instances"
 
@@ -23,8 +27,8 @@ class ChallengeInstance(Base):
     error_message = Column(Text, nullable=True)
     started_at = Column(DateTime, nullable=True)
     expires_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
+    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
     challenge = relationship("Challenge", back_populates="instances")
     user = relationship("User", back_populates="challenge_instances")
@@ -64,11 +68,11 @@ class ChallengeInstance(Base):
     def mark_error(self, message: str) -> None:
         self.status = "error"
         self.error_message = message
-        self.expires_at = datetime.utcnow()
+        self.expires_at = utcnow()
 
     def mark_stopped(self) -> None:
         self.status = "stopped"
-        self.expires_at = datetime.utcnow()
+        self.expires_at = utcnow()
 
     # ------------------------------------------------------------------
     # Derived state
@@ -79,7 +83,7 @@ class ChallengeInstance(Base):
     def is_expired(self, *, at: Optional[datetime] = None) -> bool:
         if self.expires_at is None:
             return False
-        pivot = at or datetime.utcnow()
+        pivot = at or utcnow()
         expires = self._naive_utc(self.expires_at)
         return bool(expires and expires < self._naive_utc(pivot))
 

@@ -1,5 +1,5 @@
 # app/models/achievement.py
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -8,6 +8,10 @@ class AchievementType:
     FIRST_BLOOD = "first_blood"       # first correct solver on a challenge
     FAST_SOLVER = "fast_solver"       # solved within X minutes of release
     CATEGORY_KING = "category_king"   # top scorer in a category (freeze-aware)
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
 
 class Achievement(Base):
     __tablename__ = "achievements"
@@ -22,7 +26,7 @@ class Achievement(Base):
 
     details = Column(String(255), nullable=True)  # optional: store “reason” or timespan
     points_at_award = Column(Integer, nullable=True)  # optional snapshot
-    awarded_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    awarded_at = Column(DateTime, default=utcnow, nullable=False)
 
     user = relationship("User", lazy="selectin")
     # Challenge/Category relationships are optional
