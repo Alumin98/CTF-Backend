@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,7 @@ from app.schemas import (
     ChallengeCreate,
     ChallengeInstanceRead,
     ChallengePublic,
+    ChallengeUpdate,
     HintCreate,
     HintRead,
 )
@@ -261,7 +262,7 @@ async def list_challenges(
 @router.patch("/challenges/{challenge_id}", response_model=ChallengePublic)
 async def update_challenge(
     challenge_id: int,
-    challenge_update: dict = Body(...),
+    challenge_update: ChallengeUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_admin),
 ):
@@ -270,20 +271,38 @@ async def update_challenge(
     if not ch:
         raise HTTPException(status_code=404, detail="Challenge not found")
 
-    # Map API -> model where needed
-    if "flag" in challenge_update:
-        challenge_update["flag"] = hash_flag(challenge_update["flag"])
-    if "start_time" in challenge_update:
-        challenge_update["visible_from"] = challenge_update.pop("start_time")
-    if "end_time" in challenge_update:
-        challenge_update["visible_to"] = challenge_update.pop("end_time")
-    if "deployment_type" in challenge_update and challenge_update["deployment_type"] is not None:
-        challenge_update["deployment_type"] = DeploymentType(challenge_update["deployment_type"])
+    update_payload = challenge_update.model_dump(exclude_unset=True)
+    tags = update_payload.pop("tags", None)
+    hints_payload = update_payload.pop("hints", None)
 
-    for k, v in challenge_update.items():
+    # Map API -> model where needed
+    if "flag" in update_payload:
+        update_payload["flag"] = hash_flag(update_payload["flag"])
+    if "start_time" in update_payload:
+        update_payload["visible_from"] = update_payload.pop("start_time")
+    if "end_time" in update_payload:
+        update_payload["visible_to"] = update_payload.pop("end_time")
+    if "deployment_type" in update_payload and update_payload["deployment_type"] is not None:
+        update_payload["deployment_type"] = DeploymentType(update_payload["deployment_type"])
+
+    for k, v in update_payload.items():
         if k in {"visible_from", "visible_to"} and v is not None:
             v = _as_naive(v)
         setattr(ch, k, v)
+
+    if tags is not None:
+        ch.set_tag_strings(tags)
+
+    if hints_payload is not None:
+        ch.hints.clear()
+        for hint in hints_payload:
+            if isinstance(hint, HintCreate):
+                hint_obj = hint
+            else:
+                hint_obj = HintCreate(**hint)
+            ch.hints.append(
+                Hint(text=hint_obj.text, penalty=hint_obj.penalty, order_index=hint_obj.order_index)
+            )
 
     await db.commit()
     await db.refresh(ch, attribute_names=["hints", "tags", "attachments"])
